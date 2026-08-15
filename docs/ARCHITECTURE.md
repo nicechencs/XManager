@@ -6,6 +6,7 @@
 XManager/
 ├── Cargo.toml                 # Rust workspace 根
 ├── .env.example               # API 凭证模板（勿提交 .env）
+├── run.sh / run.bat           # macOS·Linux / Windows 启动
 ├── README.md                  # 主文档
 ├── docs/
 │   └── ARCHITECTURE.md        # 本文件
@@ -85,20 +86,24 @@ tweets[] → FilterOptions
 | 响应式 | — | Wide 三栏；Medium 紧凑导航；Narrow 覆盖层 + 卡片 |
 | 命令行自动化 | `xmanager-cli` | — |
 
-`xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上 GPUI 二进制没有控制台，所以 CLI 是独立 crate。
+`xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上 GPUI 二进制没有控制台，所以 CLI 是独立 crate。CLI 无 GUI 依赖，可在无显示器的 macOS / Linux 上使用。
 
 ## 构建
+
+桌面端（`xmanager-ui`）依赖 GPUI 0.2.2：macOS 用 Metal，Linux 用 Wayland 或 X11 + Vulkan，Windows 用现有后端。系统包见根目录 [README.md](../README.md)。
 
 ```bash
 # 领域库测试
 cargo test -p xmanager-core
 
-# 命令行（离线测试）
+# 命令行（离线测试；无显示器也可）
 cargo test -p xmanager-cli
 cargo run -p xmanager-cli -- --help
+# 或 ./run.sh cli -- --help   /   run.bat cli -- --help
 
 # 桌面应用
 cargo run -p xmanager-ui --release
 # 或
 cargo run --release
+# 或 ./run.sh   /   run.bat
 ```
