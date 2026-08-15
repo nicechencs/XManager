@@ -27,6 +27,8 @@
 XManager/
 ├── Cargo.toml                 # workspace
 ├── .env.example
+├── run.sh                     # macOS / Linux 启动
+├── run.bat                    # Windows 启动
 ├── crates/
 │   ├── xmanager-core/         # API · 筛选 · 导出
 │   ├── xmanager-cli/          # 命令行（JSON stdout）
@@ -42,7 +44,7 @@ XManager/
 1. **Rust** stable（已在 `1.89+` 验证）
 2. **X Developer App**：[developer.x.com](https://developer.x.com) / [console.x.com](https://console.x.com)
 3. **OAuth 1.0a 四件套**，删除需要 **Read and Write**
-4. Windows / macOS / Linux（GPUI 0.2.2 含 Windows 后端）
+4. **Windows / macOS / Linux** 均可编译运行（GPUI 0.2.2：macOS 用 Metal，Linux 用 Wayland 或 X11 + Vulkan）
 
 > API 多为按量付费；读自己的时间线一般为 owned reads。时间线通常最多约最近 3200 条。
 
@@ -72,6 +74,59 @@ cp .env.example .env
 
 ## 构建与运行
 
+本仓库是纯 Rust，**macOS、Linux、Windows 都可以执行**。
+
+| 入口 | 适用场景 |
+|------|----------|
+| `xmanager-cli` | 无 GUI 依赖；无显示器的 Linux / CI / 自动化也能跑 |
+| `xmanager`（桌面端） | 需要图形会话：macOS（Metal）、Linux（Wayland 或 X11 + Vulkan）、Windows |
+
+### 系统依赖
+
+**所有平台**
+
+1. Rust stable（已在 `1.89+` 验证）：https://rustup.rs
+2. 仓库根目录的 `.env`（见上文）
+
+**macOS**
+
+- 安装 [Xcode](https://developer.apple.com/xcode/) 或 Command Line Tools（桌面端用 Metal 渲染）：
+
+```bash
+xcode-select --install
+```
+
+**Linux（Debian / Ubuntu 示例）**
+
+桌面端编译需要 clang、pkg-config，以及 Wayland/X11、Vulkan、字体相关开发包：
+
+```bash
+sudo apt install -y clang pkg-config \
+  libxkbcommon-dev libxkbcommon-x11-dev \
+  libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+  libfontconfig-dev libfreetype-dev \
+  libvulkan-dev libvulkan1
+```
+
+运行桌面窗口还需要图形会话（`WAYLAND_DISPLAY` 或 `DISPLAY`）和可用的 Vulkan 驱动。SSH / 无显示器环境请用 CLI。
+
+**Windows**
+
+安装 Rust（MSVC 工具链）即可；可用 `run.bat`。
+
+### 启动脚本
+
+macOS / Linux：
+
+```bash
+chmod +x run.sh          # 只需一次
+./run.sh                 # release 编译并启动（默认）
+./run.sh debug           # debug 编译并启动
+./run.sh bin             # 只跑已有 release 二进制，不重新编译
+./run.sh debug bin       # 只跑已有 debug 二进制
+./run.sh cli -- --help   # 命令行
+```
+
 Windows 可在仓库根目录双击或执行：
 
 ```bat
@@ -88,7 +143,9 @@ run.bat debug bin    :: 只跑已有 debug 二进制
 cargo run -p xmanager-ui --release
 # 或
 cargo run --release
-# 已编译时
+# 已编译时（macOS / Linux）
+./target/release/xmanager
+# Windows
 ./target/release/xmanager.exe
 ```
 
@@ -101,7 +158,8 @@ cargo run --release
 ```bash
 cargo run -p xmanager-cli -- --help
 # 或
-run.bat cli -- --help
+./run.sh cli -- --help      # macOS / Linux
+run.bat cli -- --help       # Windows
 ```
 
 | 命令 | 网络 | 作用 |
