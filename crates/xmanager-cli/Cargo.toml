@@ -1,0 +1,22 @@
+[package]
+name = "xmanager-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "XManager command-line interface for automation and tests"
+publish = false
+
+[[bin]]
+name = "xmanager-cli"
+path = "src/main.rs"
+
+[dependencies]
+xmanager-core.workspace = true
+clap = { version = "4", features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+serde_json.workspace = true

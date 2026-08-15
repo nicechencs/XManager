@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/xmanager-core",
     "crates/xmanager-ui",
+    "crates/xmanager-cli",
 ]
 default-members = ["crates/xmanager-ui"]
 

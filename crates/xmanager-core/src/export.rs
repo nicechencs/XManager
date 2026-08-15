@@ -1,7 +1,8 @@
 //! Export tweets to CSV / JSON.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::models::Tweet;
+use serde_json::Value;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -96,6 +97,40 @@ pub fn export_json(tweets: &[Tweet], path: impl AsRef<Path>) -> Result<PathBuf> 
     Ok(path.to_path_buf())
 }
 
+/// Parse tweets from JSON used by the CLI and tests.
+///
+/// Accepts:
+/// - a tweet array (`[{...}]`)
+/// - `{ "tweets": [...] }` (CLI envelope)
+/// - `{ "data": [...] }` (API-shaped)
+pub fn parse_tweets_json(text: &str) -> Result<Vec<Tweet>> {
+    let value: Value = serde_json::from_str(text)?;
+    let items = if value.is_array() {
+        value
+    } else if value.get("tweets").map(|v| v.is_array()).unwrap_or(false) {
+        value
+            .get("tweets")
+            .cloned()
+            .ok_or_else(|| Error::Parse("missing tweets array".into()))?
+    } else if value.get("data").map(|v| v.is_array()).unwrap_or(false) {
+        value
+            .get("data")
+            .cloned()
+            .ok_or_else(|| Error::Parse("missing data array".into()))?
+    } else {
+        return Err(Error::Parse(
+            "JSON must be a tweet array or an object with tweets/data".into(),
+        ));
+    };
+    serde_json::from_value(items).map_err(|e| Error::Parse(e.to_string()))
+}
+
+/// Read tweets from a JSON file on disk.
+pub fn load_tweets_file(path: impl AsRef<Path>) -> Result<Vec<Tweet>> {
+    let text = fs::read_to_string(path)?;
+    parse_tweets_json(&text)
+}
+
 /// Export based on file extension (`.csv` / `.json`). Defaults to CSV.
 pub fn export_auto(tweets: &[Tweet], path: impl AsRef<Path>) -> Result<PathBuf> {
     let path = path.as_ref();
@@ -142,5 +177,16 @@ mod tests {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(json_path).unwrap()).unwrap();
         assert_eq!(v[0]["views"], 3);
+
+        let exported = std::fs::read_to_string(dir.path().join("t.json")).unwrap();
+        let parsed = parse_tweets_json(&exported).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "1");
+        assert_eq!(parsed[0].views(), 3);
+
+        let envelope = r#"{"ok":true,"tweets":[{"id":"9","text":"x","public_metrics":{"impression_count":4}}]}"#;
+        let from_env = parse_tweets_json(envelope).unwrap();
+        assert_eq!(from_env[0].id, "9");
+        assert_eq!(from_env[0].views(), 4);
     }
 }

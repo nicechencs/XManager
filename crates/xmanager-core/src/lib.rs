@@ -10,7 +10,7 @@ pub mod models;
 pub use client::XClient;
 pub use config::Settings;
 pub use error::{Error, Result};
-pub use export::{export_auto, export_csv, export_json};
+pub use export::{export_auto, export_csv, export_json, load_tweets_file, parse_tweets_json};
 pub use filter::{
     filter_tweets, parse_created_at, summarize, view_bucket_bounds, view_histogram, FilterOptions,
     KindFilter, SortField, SortOrder, Summary, TimeRange, VIEW_BUCKETS,

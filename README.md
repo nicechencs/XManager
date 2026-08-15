@@ -28,6 +28,7 @@ XManager/
 ├── .env.example
 ├── crates/
 │   ├── xmanager-core/         # API · 筛选 · 导出
+│   ├── xmanager-cli/          # 命令行（JSON stdout）
 │   └── xmanager-ui/           # GPUI 桌面端（二进制 xmanager）
 └── docs/ARCHITECTURE.md
 ```
@@ -88,6 +89,41 @@ cargo run --release
 ```
 
 首次会编译 GPUI 及其依赖，耗时较长，属正常现象。
+
+## 命令行（自动化 / 测试）
+
+桌面窗口没有控制台。自动化走独立二进制 `xmanager-cli`，**stdout 为 JSON**。
+
+```bash
+cargo run -p xmanager-cli -- --help
+# 或
+run.bat cli -- --help
+```
+
+| 命令 | 网络 | 作用 |
+|------|------|------|
+| `creds` | 否 | 检查四项 OAuth 是否已配置 |
+| `filter` / `summarize` / `export` | 否 | 对本地推文 JSON 筛选 / 统计 / 导出 |
+| `delete` | 否（默认） | 打印将删的 id；加 `--yes` 才真删 |
+| `whoami` / `fetch` | 是 | 调 X API |
+
+```bash
+# 不打 API：用夹具测筛选
+cargo run -p xmanager-cli -- filter --input tweets.json --max-views 20
+
+# 凭证检查（可指定 .env）
+cargo run -p xmanager-cli -- creds --env .env
+
+# 预演删除（不会调用 DELETE）
+cargo run -p xmanager-cli -- delete --ids 111,222
+```
+
+退出码：`0` 成功，`2` 缺凭证，`3` API/网络，`1` 其它错误。
+
+```bash
+cargo test -p xmanager-cli          # 离线
+cargo test -p xmanager-cli -- --ignored   # 可选：打真实 API（whoami）
+```
 
 ### 界面操作
 

@@ -10,7 +10,9 @@ XManager domain library: X API v2 client (OAuth 1.0a), tweet models, filtering, 
 | `client` | Blocking `XClient`: `get_me`, `fetch_own_tweets`, `delete_tweet` |
 | `models` | `Tweet`, `User`, `PublicMetrics` |
 | `filter` | `filter_tweets`, `summarize`, histogram buckets |
-| `export` | `export_csv` / `export_json` / `export_auto` |
+| `export` | `export_csv` / `export_json` / `export_auto` / `parse_tweets_json` |
+
+命令行入口：`cargo run -p xmanager-cli -- --help`。
 
 ## Usage
 

@@ -21,6 +21,7 @@ XManager/
 │   │       ├── export.rs      # CSV / JSON
 │   │       ├── filter.rs      # 筛选 + 统计 + 比率/时段
 │   │       └── models.rs      # Tweet / User / PostKind / metrics
+│   ├── xmanager-cli/          # 命令行（JSON stdout，供自动化测试）
 │   └── xmanager-ui/           # 桌面端 GPUI 应用
 │       ├── Cargo.toml
 │       └── src/
@@ -74,12 +75,19 @@ tweets[] → FilterOptions
 | 导出 | `export_csv` / `export_json` | 内容库 / 洞察 / 清理备份 |
 | 安全删除 | `delete_tweet(s)` | 候选 → 备份 → 预演 → 二次确认 → 真删 |
 | 响应式 | — | `LayoutMode` Wide/Medium/Narrow |
+| 命令行自动化 | `xmanager-cli` | — |
+
+`xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上 GPUI 二进制没有控制台，所以 CLI 是独立 crate。
 
 ## 构建
 
 ```bash
 # 领域库测试
 cargo test -p xmanager-core
+
+# 命令行（离线测试）
+cargo test -p xmanager-cli
+cargo run -p xmanager-cli -- --help
 
 # 桌面应用
 cargo run -p xmanager-ui --release

@@ -49,8 +49,8 @@ impl Settings {
         Self::from_env()
     }
 
-    /// Ensure the four OAuth 1.0a fields are present.
-    pub fn require_oauth1(&self) -> Result<()> {
+    /// OAuth 1.0a keys that are empty (does not touch the network).
+    pub fn missing_oauth1(&self) -> Vec<&'static str> {
         let mut missing = Vec::new();
         if self.api_key.is_empty() {
             missing.push("X_API_KEY");
@@ -64,6 +64,12 @@ impl Settings {
         if self.access_token_secret.is_empty() {
             missing.push("X_ACCESS_TOKEN_SECRET");
         }
+        missing
+    }
+
+    /// Ensure the four OAuth 1.0a fields are present.
+    pub fn require_oauth1(&self) -> Result<()> {
+        let missing = self.missing_oauth1();
         if missing.is_empty() {
             Ok(())
         } else {
