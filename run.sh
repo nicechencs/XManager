@@ -88,7 +88,7 @@ warn_linux_desktop() {
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "[warn] Missing Linux libraries for the GPUI desktop app: ${missing[*]}"
-    echo "       Debian/Ubuntu: sudo apt install -y libvulkan1 libxkbcommon0 libwayland-client0"
+    echo "       Debian/Ubuntu: sudo apt install -y libvulkan1 libxkbcommon0 libwayland-client0 mesa-vulkan-drivers"
     echo "       Build headers: sudo apt install -y clang pkg-config libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig-dev"
     echo
   fi

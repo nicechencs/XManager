@@ -105,10 +105,15 @@ sudo apt install -y clang pkg-config \
   libxkbcommon-dev libxkbcommon-x11-dev \
   libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev \
   libfontconfig-dev libfreetype-dev \
-  libvulkan-dev libvulkan1
+  libvulkan-dev libvulkan1 mesa-vulkan-drivers
 ```
 
-运行桌面窗口还需要图形会话（`WAYLAND_DISPLAY` 或 `DISPLAY`）和可用的 Vulkan 驱动。SSH / 无显示器环境请用 CLI。
+运行桌面窗口还需要：
+
+1. 图形会话（`WAYLAND_DISPLAY` 或 `DISPLAY`）
+2. 可用的 Vulkan 设备（本机 GPU 驱动；无独显的虚拟机可装 `mesa-vulkan-drivers` 走 lavapipe 软件渲染）
+
+SSH / CI / 无显示器环境请用 CLI，不要启动桌面窗口。GPUI 在找不到 GPU 时会直接退出。
 
 **Windows**
 
