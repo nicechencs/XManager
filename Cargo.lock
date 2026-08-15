@@ -7203,8 +7203,10 @@ name = "xmanager-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "chrono",
  "clap",
  "predicates",
+ "serde",
  "serde_json",
  "tempfile",
  "xmanager-core",
