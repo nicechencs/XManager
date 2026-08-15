@@ -36,8 +36,8 @@ impl LayoutMode {
     pub fn nav_width(self) -> f32 {
         match self {
             Self::Wide => 220.0,
-            Self::Medium => 88.0,
-            Self::Narrow => 72.0,
+            Self::Medium => 96.0,
+            Self::Narrow => 80.0,
         }
     }
 
@@ -369,6 +369,61 @@ pub fn ids_for_cleanup_staging(
         .filter(|id| !id.is_empty())
         .map(|id| vec![id.to_owned()])
         .unwrap_or_default()
+}
+
+/// Keyboard destinations and list actions that should work from any route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceShortcut {
+    FocusNext,
+    FocusPrev,
+    ToggleFocusedSelection,
+    OpenFilter,
+    CloseOverlay,
+    GoLibrary,
+    GoInsights,
+    GoCleanup,
+}
+
+/// Map a GPUI key name onto a workspace shortcut.
+/// While the delete-confirm field is open, only Escape is claimed.
+pub fn workspace_shortcut(key: &str, confirm_open: bool) -> Option<WorkspaceShortcut> {
+    let key = key.to_ascii_lowercase();
+    if confirm_open {
+        return (key == "escape").then_some(WorkspaceShortcut::CloseOverlay);
+    }
+    match key.as_str() {
+        "escape" => Some(WorkspaceShortcut::CloseOverlay),
+        "j" | "down" | "arrowdown" => Some(WorkspaceShortcut::FocusNext),
+        "k" | "up" | "arrowup" => Some(WorkspaceShortcut::FocusPrev),
+        "space" => Some(WorkspaceShortcut::ToggleFocusedSelection),
+        "/" | "slash" => Some(WorkspaceShortcut::OpenFilter),
+        "1" => Some(WorkspaceShortcut::GoLibrary),
+        "2" => Some(WorkspaceShortcut::GoInsights),
+        "3" => Some(WorkspaceShortcut::GoCleanup),
+        _ => None,
+    }
+}
+
+/// Clicking an already-active sort header flips direction; a new field
+/// defaults to lowest-first for views and highest-first otherwise.
+pub fn next_sort_from_header(
+    current_sort: SortField,
+    current_order: SortOrder,
+    clicked: SortField,
+) -> (SortField, SortOrder) {
+    if current_sort == clicked {
+        let order = match current_order {
+            SortOrder::Asc => SortOrder::Desc,
+            SortOrder::Desc => SortOrder::Asc,
+        };
+        (clicked, order)
+    } else {
+        let order = match clicked {
+            SortField::Views => SortOrder::Asc,
+            _ => SortOrder::Desc,
+        };
+        (clicked, order)
+    }
 }
 
 /// Next action the operator should take on the cleanup route.
@@ -1162,6 +1217,71 @@ impl AppState {
         )
     }
 
+    pub fn apply_sort_header(&mut self, field: SortField, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        let (sort, order) =
+            next_sort_from_header(self.filter_draft.sort, self.filter_draft.order, field);
+        self.filter_draft.sort = sort;
+        self.filter_draft.order = order;
+        self.apply_filters(cx);
+    }
+
+    pub fn handle_workspace_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        let Some(shortcut) = workspace_shortcut(key, self.delete_confirm.is_some()) else {
+            return false;
+        };
+        match shortcut {
+            WorkspaceShortcut::FocusNext => {
+                if self.active_route != Route::Library {
+                    self.active_route = Route::Library;
+                }
+                self.focus_next(cx);
+            }
+            WorkspaceShortcut::FocusPrev => {
+                if self.active_route != Route::Library {
+                    self.active_route = Route::Library;
+                }
+                self.focus_previous(cx);
+            }
+            WorkspaceShortcut::ToggleFocusedSelection => {
+                if let Some(id) = self.focused_tweet_id.clone() {
+                    self.toggle_selected(&id, cx);
+                } else {
+                    return false;
+                }
+            }
+            WorkspaceShortcut::OpenFilter => {
+                self.active_route = Route::Library;
+                self.filter_drawer_open = true;
+                cx.notify();
+            }
+            WorkspaceShortcut::CloseOverlay => {
+                if self.delete_confirm.is_some() {
+                    self.cancel_delete_confirm(cx);
+                } else if self.error_msg.is_some() {
+                    self.clear_error();
+                    cx.notify();
+                } else if self.filter_drawer_open {
+                    self.filter_drawer_open = false;
+                    cx.notify();
+                } else if self.focused_tweet_id.is_some()
+                    && self.layout_mode.inspector_as_overlay()
+                {
+                    self.focused_tweet_id = None;
+                    cx.notify();
+                } else {
+                    return false;
+                }
+            }
+            WorkspaceShortcut::GoLibrary => self.set_route(Route::Library, cx),
+            WorkspaceShortcut::GoInsights => self.set_route(Route::Insights, cx),
+            WorkspaceShortcut::GoCleanup => self.set_route(Route::Cleanup, cx),
+        }
+        true
+    }
+
     pub fn apply_filters(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -1849,10 +1969,11 @@ impl AppState {
 mod tests {
     use super::{
         applied_filter_chips, chip_label, classify_preview, cleanup_next_hint,
-        clamp_inspector_width, delete_confirm_ready, ids_for_cleanup_staging, preview_from_lookup,
-        receipt_matches, refresh_candidate_snapshot, resolve_focused_tweet, AppliedFilterChip,
-        DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft, INSPECTOR_WIDTH_MAX,
-        INSPECTOR_WIDTH_MIN, LayoutMode, Receipt,
+        clamp_inspector_width, delete_confirm_ready, ids_for_cleanup_staging, next_sort_from_header,
+        preview_from_lookup, receipt_matches, refresh_candidate_snapshot, resolve_focused_tweet,
+        workspace_shortcut, AppliedFilterChip, DeleteConfirm, DeleteConfirmToken, DeleteOutcome,
+        FilterDraft, INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN, LayoutMode, Receipt,
+        WorkspaceShortcut,
     };
     use std::collections::{HashMap, HashSet};
     use xmanager_core::{
@@ -2099,6 +2220,43 @@ mod tests {
         assert_eq!(outcome.missing, vec!["b".to_owned()]);
         assert!(outcome.failed.is_empty());
         assert!(outcome.summary_line().contains("可删 2"));
+    }
+
+    #[test]
+    fn sort_header_toggles_same_field_and_defaults_new_field() {
+        assert_eq!(
+            next_sort_from_header(SortField::Views, SortOrder::Asc, SortField::Views),
+            (SortField::Views, SortOrder::Desc)
+        );
+        assert_eq!(
+            next_sort_from_header(SortField::Views, SortOrder::Asc, SortField::LikeRate),
+            (SortField::LikeRate, SortOrder::Desc)
+        );
+        assert_eq!(
+            next_sort_from_header(SortField::LikeRate, SortOrder::Desc, SortField::Views),
+            (SortField::Views, SortOrder::Asc)
+        );
+    }
+
+    #[test]
+    fn workspace_shortcuts_yield_to_delete_confirm_except_escape() {
+        assert_eq!(
+            workspace_shortcut("j", false),
+            Some(WorkspaceShortcut::FocusNext)
+        );
+        assert_eq!(
+            workspace_shortcut("slash", false),
+            Some(WorkspaceShortcut::OpenFilter)
+        );
+        assert_eq!(workspace_shortcut("j", true), None);
+        assert_eq!(
+            workspace_shortcut("Escape", true),
+            Some(WorkspaceShortcut::CloseOverlay)
+        );
+        assert_eq!(
+            workspace_shortcut("2", false),
+            Some(WorkspaceShortcut::GoInsights)
+        );
     }
 
     #[test]

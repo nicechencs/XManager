@@ -2,7 +2,7 @@
 
 use crate::app::{chip_label, AppState, AppliedFilterChip, ExportFormat};
 use crate::theme;
-use crate::widgets::{btn, toggle_chip};
+use crate::widgets::{btn, removable_chip, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
 
 pub fn active_filter_summary(state: &AppState) -> String {
@@ -36,18 +36,16 @@ pub fn active_filter_summary(state: &AppState) -> String {
     )
 }
 
-fn removable_chip(
+fn applied_chip(
     id: impl Into<gpui::SharedString>,
     label: impl Into<String>,
     chip: AppliedFilterChip,
     enabled: bool,
     cx: &mut Context<AppState>,
 ) -> impl gpui::IntoElement {
-    let label = label.into();
-    btn(
+    removable_chip(
         id,
-        format!("× {label}"),
-        false,
+        label.into(),
         enabled,
         cx.listener(move |this, _, _window, cx| this.remove_applied_chip(chip.clone(), cx)),
     )
@@ -94,31 +92,19 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             div()
                 .flex()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .justify_between()
                 .gap_3()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_lg()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("内容库"),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme::c(theme::TEXT_MUTED))
-                                .child("筛选、检查并整理你的 X 内容"),
-                        ),
-                )
+                .child(crate::widgets::page_heading(
+                    "内容库",
+                    "筛选、检查并整理你的 X 内容",
+                ))
                 .child(
                     div()
                         .flex()
                         .flex_row()
+                        .flex_wrap()
                         .items_center()
                         .gap_2()
                         .child(btn(
@@ -152,13 +138,16 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         )),
                 ),
         )
-        .child(div().flex().flex_row().items_center().gap_2().children([
+        .child(div().flex().flex_row().flex_wrap().items_center().gap_2().children([
             toggle_chip(
                 "filter-drawer-toggle",
-                if state.filter_drawer_open {
-                    "收起筛选"
-                } else {
-                    "筛选"
+                {
+                    let n = state.applied_chips().len();
+                    if state.filter_drawer_open {
+                        format!("收起筛选 · {n}")
+                    } else {
+                        format!("筛选 · {n}")
+                    }
                 },
                 state.filter_drawer_open,
                 cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
@@ -196,7 +185,7 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .enumerate()
                 .map(move |(idx, chip)| {
                     let label = chip_label(&chip);
-                    removable_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx)
+                    applied_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx)
                         .into_any_element()
                 })
         }))
@@ -228,10 +217,12 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
     div()
         .flex()
         .flex_row()
+        .flex_wrap()
         .items_center()
         .gap_2()
-        .h(px(48.))
+        .min_h(px(48.))
         .px_4()
+        .py_2()
         .bg(theme::c(theme::BG_PANEL))
         .border_t_1()
         .border_color(theme::c(theme::BORDER))

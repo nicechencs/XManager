@@ -5,7 +5,10 @@ use crate::app::{
 };
 use crate::theme;
 use crate::views::{status_bar, toolbar, tweet_list};
-use crate::widgets::{btn, danger_btn, section_label, stat_card, stepper, toggle_chip};
+use crate::widgets::{
+    btn, count_badge, danger_btn, kind_badge, metric_tile, nav_destination, page_heading,
+    section_label, stepper, toggle_chip,
+};
 use gpui::{
     div, prelude::*, px, Context, CursorStyle, Div, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Stateful,
@@ -76,6 +79,23 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     ))
                 }),
         )
+        .when(state.filter_draft_is_dirty(), |el| {
+            el.child(
+                div()
+                    .px_2()
+                    .py_2()
+                    .rounded_md()
+                    .bg(theme::c(theme::CHIP_ACTIVE))
+                    .border_1()
+                    .border_color(theme::c(theme::ACCENT))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme::c(theme::TEXT))
+                            .child("有未应用修改，点「应用筛选」后才会更新列表。"),
+                    ),
+            )
+        })
         .child(section_label("拉取数量"))
         .child(div().flex().flex_row().flex_wrap().gap_1().children(
             [50usize, 100, 200, 500, 1000].into_iter().map(|n| {
@@ -257,24 +277,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 }),
             ),
         )
-        .child(section_label("低曝光快捷"))
-        .child(div().flex().flex_row().flex_wrap().gap_1().children(
-            [10u64, 20, 50, 100].into_iter().map(|threshold| {
-                toggle_chip(
-                    format!("low-views-{threshold}"),
-                    format!("≤{threshold}"),
-                    d.max_views == Some(threshold)
-                        && d.min_views.is_none()
-                        && d.sort == SortField::Views
-                        && d.order == SortOrder::Asc
-                        && d.top_n.is_none(),
-                    cx.listener(move |this, _, _window, cx| {
-                        this.apply_low_exposure_preset(threshold, cx);
-                        this.filter_drawer_open = false;
-                    }),
-                )
-            }),
-        ))
+        .child(section_label("升降序"))
         .child(
             div()
                 .flex()
@@ -282,7 +285,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 .gap_1()
                 .child(toggle_chip(
                     "order-asc",
-                    "最低",
+                    "最低优先",
                     d.order == SortOrder::Asc,
                     cx.listener(|this, _, _window, cx| {
                         this.filter_draft.order = SortOrder::Asc;
@@ -291,7 +294,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 ))
                 .child(toggle_chip(
                     "order-desc",
-                    "最高",
+                    "最高优先",
                     d.order == SortOrder::Desc,
                     cx.listener(|this, _, _window, cx| {
                         this.filter_draft.order = SortOrder::Desc;
@@ -320,9 +323,31 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     }),
             ),
         )
+        .child(section_label("低曝光快捷"))
+        .child(div().flex().flex_row().flex_wrap().gap_1().children(
+            [10u64, 20, 50, 100].into_iter().map(|threshold| {
+                toggle_chip(
+                    format!("low-views-{threshold}"),
+                    format!("≤{threshold}"),
+                    d.max_views == Some(threshold)
+                        && d.min_views.is_none()
+                        && d.sort == SortField::Views
+                        && d.order == SortOrder::Asc
+                        && d.top_n.is_none(),
+                    cx.listener(move |this, _, _window, cx| {
+                        this.apply_low_exposure_preset(threshold, cx);
+                        this.filter_drawer_open = false;
+                    }),
+                )
+            }),
+        ))
         .child(btn(
             "apply-filters",
-            "应用筛选",
+            if state.filter_draft_is_dirty() {
+                "应用筛选 · 有修改"
+            } else {
+                "应用筛选"
+            },
             true,
             !state.loading,
             cx.listener(|this, _, _window, cx| {
@@ -377,10 +402,32 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
         let metrics = &tweet.public_metrics;
         let id = tweet.id.clone();
         let candidate = state.cleanup_candidates.contains(&id);
+        let kind = tweet.kind();
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(kind_badge(kind))
+                    .when(candidate, |el| {
+                        el.child(
+                            div()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .bg(theme::c(theme::CHIP_ACTIVE))
+                                .text_xs()
+                                .text_color(theme::c(theme::TEXT))
+                                .child("已在安全清理"),
+                        )
+                    }),
+            )
             .child(
                 div()
                     .text_sm()
@@ -395,17 +442,28 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                         .child("不在当前筛选结果中，显示候选快照"),
                 )
             })
-            .child(context_metric("类型", tweet.kind().label_zh().to_string()))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(metric_tile("曝光", tweet.views().to_string()))
+                    .child(metric_tile("点赞", metrics.like_count.to_string()))
+                    .child(metric_tile("收藏", metrics.bookmark_count.to_string()))
+                    .child(metric_tile("转发", metrics.retweet_count.to_string()))
+                    .child(metric_tile("回复", metrics.reply_count.to_string()))
+                    .child(metric_tile("互动量", tweet.engagement().to_string()))
+                    .child(metric_tile(
+                        "点赞率",
+                        Tweet::format_rate(tweet.like_rate()),
+                    ))
+                    .child(metric_tile(
+                        "互动率",
+                        Tweet::format_rate(tweet.engagement_rate()),
+                    )),
+            )
             .child(context_metric("发布时间", tweet.display_date()))
-            .child(context_metric("曝光", tweet.views().to_string()))
-            .child(context_metric(
-                "点赞 / 收藏",
-                format!("{} / {}", metrics.like_count, metrics.bookmark_count),
-            ))
-            .child(context_metric(
-                "互动率",
-                Tweet::format_rate(tweet.engagement_rate()),
-            ))
             .child(context_metric("推文 ID", id.clone()))
             .child(
                 div()
@@ -499,11 +557,24 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                 .flex_col()
                 .gap_2()
                 .child(section_label("选择一条推文查看完整内容"))
-                .child(stat_card("当前结果", state.filtered.len().to_string()))
-                .child(stat_card(
-                    "安全清理候选",
-                    state.cleanup_candidates.len().to_string(),
-                ))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(metric_tile("当前结果", state.filtered.len().to_string()))
+                        .child(metric_tile(
+                            "安全清理候选",
+                            state.cleanup_candidates.len().to_string(),
+                        )),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::c(theme::TEXT_DIM))
+                        .child("J / K 上下条 · 空格勾选 · / 打开筛选"),
+                )
         }))
 }
 
@@ -538,45 +609,8 @@ fn error_banner(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
 
 fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
     let show_labels = state.layout_mode.show_nav_labels();
+    let compact = !show_labels;
     let nav_w = state.layout_mode.nav_width();
-    let route_button = |id: &'static str,
-                        full: &'static str,
-                        short: &'static str,
-                        route: Route,
-                        active: bool,
-                        badge: Option<usize>| {
-        let base = if show_labels { full } else { short };
-        let label = badge
-            .map(|count| {
-                if show_labels {
-                    format!("{base}  {count}")
-                } else {
-                    format!("{base}:{count}")
-                }
-            })
-            .unwrap_or_else(|| base.into());
-        let chip = toggle_chip(
-            id,
-            label,
-            active,
-            cx.listener(move |this, _, _window, cx| this.set_route(route, cx)),
-        );
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .w_full()
-            .gap_1()
-            .child(chip)
-            .when(!show_labels, |el| {
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme::c(theme::TEXT_MUTED))
-                        .child(full),
-                )
-            })
-    };
     div()
         .flex()
         .flex_col()
@@ -595,29 +629,29 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(if show_labels { "XManager" } else { "XM" }),
         )
         .when(show_labels, |el| el.child(section_label("工作台")))
-        .child(route_button(
+        .child(nav_destination(
             "nav-library",
-            "内容库",
-            "库",
-            Route::Library,
+            if compact { "内容" } else { "内容库" },
+            compact,
             state.active_route == Route::Library,
             None,
+            cx.listener(|this, _, _window, cx| this.set_route(Route::Library, cx)),
         ))
-        .child(route_button(
+        .child(nav_destination(
             "nav-insights",
-            "数据洞察",
-            "析",
-            Route::Insights,
+            if compact { "洞察" } else { "数据洞察" },
+            compact,
             state.active_route == Route::Insights,
             None,
+            cx.listener(|this, _, _window, cx| this.set_route(Route::Insights, cx)),
         ))
-        .child(route_button(
+        .child(nav_destination(
             "nav-cleanup",
-            "安全清理",
-            "清",
-            Route::Cleanup,
+            if compact { "清理" } else { "安全清理" },
+            compact,
             state.active_route == Route::Cleanup,
             Some(state.cleanup_candidates.len()),
+            cx.listener(|this, _, _window, cx| this.set_route(Route::Cleanup, cx)),
         ))
         .child(div().flex_1())
         .child(
@@ -627,7 +661,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(if show_labels {
                     format!("{} 条数据", state.all_tweets.len())
                 } else {
-                    format!("{}", state.all_tweets.len())
+                    format!("{} 条", state.all_tweets.len())
                 }),
         )
         .child(
@@ -638,7 +672,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     Some(ts) if show_labels => format!("同步 {ts}"),
                     Some(ts) => ts.to_string(),
                     None if show_labels => "尚未同步".into(),
-                    None => "—".into(),
+                    None => "未同步".into(),
                 }),
         )
         .when(show_labels, |el| {
@@ -655,7 +689,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         })
         .child(btn(
             "sidebar-refresh",
-            if show_labels { "刷新状态" } else { "刷" },
+            if show_labels { "刷新状态" } else { "刷新" },
             false,
             !state.loading,
             cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
@@ -663,9 +697,13 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .child(btn(
             "sidebar-theme",
             if show_labels {
-                format!("外观：{}", state.theme_mode.label_zh())
+                format!(
+                    "{} → {}",
+                    state.theme_mode.label_zh(),
+                    state.theme_mode.opposite_label_zh()
+                )
             } else {
-                state.theme_mode.label_zh().to_string()
+                state.theme_mode.opposite_label_zh().to_string()
             },
             false,
             true,
@@ -812,9 +850,23 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
         let tweet = state.cleanup_snapshot.get(id);
         let id_for_focus = id.clone();
         let id_for_remove = id.clone();
+        let preview = tweet
+            .map(|t| crate::widgets::truncate_text(&t.text.replace('\n', " "), 90))
+            .unwrap_or_else(|| id.clone());
+        let meta = tweet
+            .map(|t| {
+                format!(
+                    "{} · 曝光 {} · {}",
+                    t.kind().label_zh(),
+                    t.views(),
+                    t.display_date()
+                )
+            })
+            .unwrap_or_else(|| format!("ID {id}"));
         div()
             .flex()
             .flex_row()
+            .flex_wrap()
             .items_center()
             .gap_2()
             .px_3()
@@ -822,18 +874,26 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             .bg(theme::c(theme::BG_ROW))
             .border_b_1()
             .border_color(theme::c(theme::BORDER))
-            .child(
-                div().flex_1().text_sm().child(
-                    tweet
-                        .map(|t| crate::widgets::truncate_text(&t.text.replace('\n', " "), 90))
-                        .unwrap_or_else(|| id.clone()),
-                ),
-            )
-            .child(
+            .child(tweet.map(|t| kind_badge(t.kind())).unwrap_or_else(|| {
                 div()
                     .text_xs()
                     .text_color(theme::c(theme::TEXT_MUTED))
-                    .child(id.clone()),
+                    .child("快照")
+            }))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(160.))
+                    .gap_1()
+                    .child(div().text_sm().child(preview))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme::c(theme::TEXT_MUTED))
+                            .child(meta),
+                    ),
             )
             .child(btn(
                 format!("cleanup-focus-{id}"),
@@ -881,18 +941,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .min_h(px(0.))
         .p_4()
         .gap_3()
-        .child(
-            div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .child("安全清理"),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(next_hint),
-        )
+        .child(page_heading("安全清理", next_hint))
         .child({
             let stacked = state.layout_mode.stack_cleanup_steps();
             let steps = if stacked {
@@ -930,9 +979,11 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             div()
                 .flex()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
                 .child(section_label(format!("{} 条候选", candidate_ids.len())))
+                .child(count_badge(candidate_ids.len()))
                 .child(div().flex_1())
                 .child(btn(
                     "backup-csv",
@@ -1262,6 +1313,12 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex_1()
                 .gap_2()
                 .child(section_label("还没有候选推文"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme::c(theme::TEXT_MUTED))
+                        .child("在内容库勾选或打开一条，再加入安全清理。"),
+                )
                 .child(btn(
                     "cleanup-to-library",
                     "返回内容库选择",
@@ -1272,8 +1329,12 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .into_any_element()
         } else {
             div()
+                .id("cleanup-candidate-list")
                 .flex()
                 .flex_col()
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
                 .gap_1()
                 .children(rows)
                 .into_any_element()
@@ -1316,18 +1377,25 @@ fn step_card(number: &str, label: &str, done: bool, stacked: bool) -> Div {
         )
 }
 
-pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> Div {
+pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::IntoElement {
     let page = match state.active_route {
         Route::Library => render_library(state, cx).into_any_element(),
         Route::Insights => crate::views::render_insights(state, cx).into_any_element(),
         Route::Cleanup => render_cleanup(state, cx).into_any_element(),
     };
     div()
+        .id("xmanager-root")
         .flex()
         .flex_col()
         .size_full()
         .bg(theme::c(theme::BG))
         .text_color(theme::c(theme::TEXT))
+        .tab_index(0)
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+            if this.handle_workspace_key(event.keystroke.key.as_str(), cx) {
+                cx.stop_propagation();
+            }
+        }))
         .children(error_banner(state, cx))
         .child(
             div()
