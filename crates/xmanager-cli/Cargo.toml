@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 xmanager-core.workspace = true
 clap = { version = "4", features = ["derive"] }
+serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
@@ -20,3 +21,4 @@ assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
 serde_json.workspace = true
+chrono.workspace = true

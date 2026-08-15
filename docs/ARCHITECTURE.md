@@ -20,6 +20,7 @@ XManager/
 │   │       ├── error.rs
 │   │       ├── export.rs      # CSV / JSON
 │   │       ├── filter.rs      # 筛选 + 统计 + 比率/时段
+│   │       ├── logging.rs     # JSONL 双流日志（app 14d / audit 90d）
 │   │       └── models.rs      # Tweet / User / PostKind / metrics
 │   ├── xmanager-cli/          # 命令行（JSON stdout，供自动化测试）
 │   └── xmanager-ui/           # 桌面端 GPUI 应用
@@ -31,6 +32,7 @@ XManager/
 │           ├── widgets.rs
 │           └── views/
 └── exports/                   # 运行时导出目录（gitignore）
+└── logs/                      # 运行时日志（gitignore；见 docs/LOGGING.md）
 ```
 
 ## 设计原则
@@ -40,6 +42,7 @@ XManager/
 3. **凭证只来自环境**：`.env` / 环境变量；永不写死密钥。
 4. **删除需确认**：安全清理绑定 revision/receipt；真删前备份 + 预演 + 二次确认（数量/`DELETE`）。
 5. **目录干净**：根目录只放 workspace 配置与文档；实现代码只在 `crates/*`。
+6. **本地可审计日志**：诊断写 `logs/xmanager-app-YYYY-MM-DD.log`（14 天）；备份/预演/删除写 `logs/xmanager-audit-YYYY-MM-DD.log`（90 天，Info+ 不丢）。密钥与推文正文禁止入日志。详见 [LOGGING.md](LOGGING.md)。
 
 ## UI 壳层
 
@@ -77,6 +80,7 @@ tweets[] → FilterOptions
 | 排名 | 当前 `filtered` 顺序 | 洞察 Top-N 列表，点击回内容库 |
 | 导出 | `export_csv` / `export_json` | 内容库 / 洞察 / 清理备份 |
 | 安全删除 | `lookup_tweets` + `delete_tweet(s)` | 自动备份 → API 预演 → chip 二次确认 → 真删 |
+| 本地日志 | `logging` | 启动初始化；API / 导出 / 清理审计（见 [LOGGING.md](LOGGING.md)） |
 | 外观 | — | 侧栏浅色/深色 |
 | 响应式 | — | Wide 三栏；Medium 紧凑导航；Narrow 覆盖层 + 卡片 |
 | 命令行自动化 | `xmanager-cli` | — |

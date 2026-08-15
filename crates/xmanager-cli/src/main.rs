@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use xmanager_core::logging::{self, events, Outcome, Stream};
 use xmanager_core::{
     export_auto, filter_tweets, load_tweets_file, parse_tweets_json, summarize, FilterOptions,
     KindFilter, Settings, SortField, SortOrder, TimeRange, Tweet, XClient,
@@ -151,6 +152,17 @@ enum TimeRangeArg {
 }
 
 fn main() -> ExitCode {
+    let logging_ok = logging::init_best_effort();
+    logging::info(Stream::App, events::APP_START)
+        .outcome(if logging_ok {
+            Outcome::Ok
+        } else {
+            Outcome::Error
+        })
+        .field("version", env!("CARGO_PKG_VERSION"))
+        .field("file_logging", logging_ok)
+        .field("binary", "xmanager-cli")
+        .emit();
     let cli = Cli::parse();
     match run(cli) {
         Ok(()) => ExitCode::from(EXIT_OK),
@@ -244,6 +256,21 @@ fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
         "missing": missing,
         "has_bearer": !settings.bearer_token.is_empty(),
     });
+    let presence = settings.credential_presence();
+    logging::info(Stream::App, events::APP_CONFIG)
+        .outcome(if missing.is_empty() {
+            Outcome::Ok
+        } else {
+            Outcome::Error
+        })
+        .field("oauth1", missing.is_empty())
+        .field("has_api_key", presence.api_key)
+        .field("has_api_secret", presence.api_secret)
+        .field("has_access_token", presence.access_token)
+        .field("has_access_token_secret", presence.access_token_secret)
+        .field("has_bearer", presence.bearer_token)
+        .field("binary", "xmanager-cli")
+        .emit();
     if missing.is_empty() {
         emit_ok(payload)
     } else {
@@ -305,6 +332,12 @@ fn cmd_delete(
     }
 
     if !yes {
+        logging::info(Stream::Audit, events::CLEANUP_PREVIEW)
+            .outcome(Outcome::Ok)
+            .field("dry_run", true)
+            .field("total", ids.len() as u64)
+            .field("binary", "xmanager-cli")
+            .emit();
         return emit_ok(json!({
             "command": "delete",
             "dry_run": true,
@@ -325,6 +358,20 @@ fn cmd_delete(
         "deleted": ok,
         "failed": failed_json,
     });
+    let outcome = if failed_json.is_empty() {
+        Outcome::Ok
+    } else if ok == 0 {
+        Outcome::Error
+    } else {
+        Outcome::Partial
+    };
+    logging::info(Stream::Audit, events::CLEANUP_DELETE)
+        .outcome(outcome)
+        .field("requested", ids.len() as u64)
+        .field("succeeded", ok as u64)
+        .field("failed", failed_json.len() as u64)
+        .field("binary", "xmanager-cli")
+        .emit();
     if failed_json.is_empty() {
         emit_ok(payload)
     } else {

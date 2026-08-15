@@ -32,9 +32,10 @@ XManager/
 │   ├── xmanager-cli/          # 命令行（JSON stdout）
 │   └── xmanager-ui/           # GPUI 桌面端（二进制 xmanager）
 └── docs/ARCHITECTURE.md
+└── docs/LOGGING.md            # 日志命名 / 保留 / 事件目录
 ```
 
-详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [docs/LOGGING.md](docs/LOGGING.md)。
 
 ## 前置条件
 
@@ -59,6 +60,8 @@ cp .env.example .env
 | `X_API_SECRET` | Consumer Secret |
 | `X_ACCESS_TOKEN` | User Access Token |
 | `X_ACCESS_TOKEN_SECRET` | User Access Token Secret |
+| `XMANAGER_LOG_DIR` | 可选，日志目录，默认 `logs` |
+| `XMANAGER_LOG_LEVEL` | 可选，`debug` / `info` / `warn` / `error`，默认 `info` |
 
 ### Developer Portal 简要步骤
 
@@ -154,6 +157,7 @@ export_csv(&low, "exports/low.csv")?;
 - **删除不可恢复**，务必先导出或 dry-run  
 - 注意 API 速率限制与费用  
 - `impression_count` 为展示次数，可能与网页统计略有差异  
+- 诊断与删除审计写在 `logs/`（app 保留 14 天，audit 保留 90 天）；不含密钥与推文正文 
 
 ## License
 

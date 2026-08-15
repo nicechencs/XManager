@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
 use gpui::{AsyncApp, Context, SharedString, UniformListScrollHandle, WeakEntity, Window};
+use xmanager_core::logging::{self, events, artifact_file_stem, Outcome, Stream};
 use xmanager_core::{
     export_csv, export_json, filter_tweets, summarize, view_bucket_bounds, view_histogram,
     FilterOptions, KindFilter, Settings, SortField, SortOrder, Summary, TimeRange, Tweet,
@@ -566,12 +567,42 @@ impl AppState {
         // `theme::c(token)` without threading mode through every widget.
         crate::theme::set_mode(crate::theme::ThemeMode::Light);
         let (credentials_ok, credentials_msg) = match Settings::load() {
-            Ok(s) if s.has_oauth1() => (true, SharedString::from("凭证已配置 ✓")),
-            Ok(_) => (
-                false,
-                SharedString::from("缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）"),
-            ),
-            Err(e) => (false, SharedString::from(format!("读取配置失败: {e}"))),
+            Ok(s) if s.has_oauth1() => {
+                let presence = s.credential_presence();
+                logging::info(Stream::App, events::APP_CONFIG)
+                    .outcome(Outcome::Ok)
+                    .field("oauth1", true)
+                    .field("has_api_key", presence.api_key)
+                    .field("has_api_secret", presence.api_secret)
+                    .field("has_access_token", presence.access_token)
+                    .field("has_access_token_secret", presence.access_token_secret)
+                    .field("has_bearer", presence.bearer_token)
+                    .emit();
+                (true, SharedString::from("凭证已配置 ✓"))
+            }
+            Ok(s) => {
+                let presence = s.credential_presence();
+                logging::warn(Stream::App, events::APP_CONFIG)
+                    .outcome(Outcome::Error)
+                    .field("oauth1", false)
+                    .field("has_api_key", presence.api_key)
+                    .field("has_api_secret", presence.api_secret)
+                    .field("has_access_token", presence.access_token)
+                    .field("has_access_token_secret", presence.access_token_secret)
+                    .field("has_bearer", presence.bearer_token)
+                    .emit();
+                (
+                    false,
+                    SharedString::from("缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）"),
+                )
+            }
+            Err(e) => {
+                logging::error(Stream::App, events::APP_CONFIG)
+                    .outcome(Outcome::Error)
+                    .field("error", e.to_string())
+                    .emit();
+                (false, SharedString::from(format!("读取配置失败: {e}")))
+            }
         };
 
         let filter_draft = FilterDraft::default();
@@ -830,6 +861,12 @@ impl AppState {
     pub fn cancel_delete_confirm(&mut self, cx: &mut Context<Self>) {
         if self.delete_confirm.take().is_some() {
             self.status_msg = SharedString::from("已取消真实删除确认");
+            logging::info(Stream::Audit, events::CLEANUP_CANCEL)
+                .outcome(Outcome::Cancel)
+                .field("stage", "confirm_token")
+                .field("revision", self.cleanup_revision)
+                .field("count", self.cleanup_candidates.len() as u64)
+                .emit();
         }
         cx.notify();
     }
@@ -964,15 +1001,20 @@ impl AppState {
         }
         let dir = Settings::default_export_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建导出目录: {e}"))?;
-        let path = dir.join(format!(
-            "xmanager_cleanup_{}.csv",
-            Local::now().format("%Y%m%d_%H%M%S")
-        ));
+        let path = dir.join(format!("{}.csv", artifact_file_stem("cleanup", Local::now())));
         let written = export_csv(&tweets, &path).map_err(|e| e.to_string())?;
         self.backup_receipt = Some(Receipt {
             revision: self.cleanup_revision,
             candidate_ids: self.cleanup_candidates.clone(),
         });
+        logging::info(Stream::Audit, events::CLEANUP_BACKUP)
+            .outcome(Outcome::Ok)
+            .field("revision", self.cleanup_revision)
+            .field("count", tweets.len() as u64)
+            .field("path", written.display().to_string())
+            .field("receipt_bound", true)
+            .field("source", "auto")
+            .emit();
         Ok(written.display().to_string())
     }
 
@@ -1015,6 +1057,15 @@ impl AppState {
         });
         self.previewed_delete_ids = snapshot;
         self.status_msg = SharedString::from(outcome.summary_line());
+        logging::info(Stream::Audit, events::CLEANUP_PREVIEW)
+            .outcome(Outcome::Ok)
+            .field("revision", revision)
+            .field("total", outcome.total as u64)
+            .field("deletable", outcome.deletable.len() as u64)
+            .field("missing", outcome.missing.len() as u64)
+            .field("failed", outcome.failed.len() as u64)
+            .field("source", "lookup_or_local")
+            .emit();
         self.preview_outcome = Some(outcome);
     }
 
@@ -1066,7 +1117,7 @@ impl AppState {
                                 Ok(_) => {
                                     state.error_msg = None;
                                     state.status_msg = SharedString::from(format!(
-                                        "X API 预演不可用，已改用本地缓存。原因: {err}（详见 exports/xmanager.log）"
+                                        "X API 预演不可用，已改用本地缓存。原因: {err}（详见 logs/）"
                                     ));
                                     if then_confirm {
                                         state.begin_delete_confirm(cx);
@@ -1075,7 +1126,7 @@ impl AppState {
                                 }
                                 Err(_) => {
                                     state.set_error(format!(
-                                        "预演失败: {err}（详见 exports/xmanager.log）"
+                                        "预演失败: {err}（详见 logs/）"
                                     ));
                                 }
                             }
@@ -1216,6 +1267,10 @@ impl AppState {
     pub fn set_error(&mut self, err: impl Into<SharedString>) {
         self.loading = false;
         let msg = err.into();
+        logging::error(Stream::App, events::UI_ERROR)
+            .outcome(Outcome::Error)
+            .field("message", msg.to_string())
+            .emit();
         self.error_msg = Some(msg.clone());
         self.status_msg = SharedString::from("出错");
     }
@@ -1389,8 +1444,7 @@ impl AppState {
             ExportFormat::Csv => "csv",
             ExportFormat::Json => "json",
         };
-        let stamp = Local::now().format("%Y%m%d_%H%M%S");
-        let suggested = format!("low_{stamp}.{ext}");
+        let suggested = format!("{}.{ext}", artifact_file_stem("library", Local::now()));
         let n = tweets.len();
 
         let dir = Settings::default_export_dir();
@@ -1480,11 +1534,7 @@ impl AppState {
             ExportFormat::Csv => "csv",
             ExportFormat::Json => "json",
         };
-        let suggested = format!(
-            "xmanager_cleanup_{}.{}",
-            Local::now().format("%Y%m%d_%H%M%S"),
-            ext
-        );
+        let suggested = format!("{}.{ext}", artifact_file_stem("cleanup", Local::now()));
         let n = tweets.len();
         let dir = Settings::default_export_dir();
         let _ = std::fs::create_dir_all(&dir);
@@ -1526,19 +1576,34 @@ impl AppState {
                     state.loading = false;
                     match result {
                         Ok(path) => {
-                            if state.cleanup_revision == revision
-                                && state.cleanup_candidates == candidate_ids
-                            {
+                            let bound = state.cleanup_revision == revision
+                                && state.cleanup_candidates == candidate_ids;
+                            if bound {
                                 state.backup_receipt = Some(Receipt {
                                     revision,
-                                    candidate_ids,
+                                    candidate_ids: candidate_ids.clone(),
                                 });
                             }
+                            logging::info(Stream::Audit, events::CLEANUP_BACKUP)
+                                .outcome(Outcome::Ok)
+                                .field("revision", revision)
+                                .field("count", n as u64)
+                                .field("path", path.as_str())
+                                .field("receipt_bound", bound)
+                                .emit();
                             state.error_msg = None;
                             state.status_msg =
                                 SharedString::from(format!("已备份 {n} 条候选 → {path}"));
                         }
-                        Err(err) => state.set_error(format!("备份失败: {err}")),
+                        Err(err) => {
+                            logging::error(Stream::Audit, events::CLEANUP_BACKUP)
+                                .outcome(Outcome::Error)
+                                .field("revision", revision)
+                                .field("count", n as u64)
+                                .field("error", err.as_str())
+                                .emit();
+                            state.set_error(format!("备份失败: {err}"));
+                        }
                     }
                     cx.notify();
                 })
@@ -1730,6 +1795,25 @@ impl AppState {
                             }
                             state.last_delete_outcome = Some(outcome.clone());
                             state.status_msg = SharedString::from(outcome.summary_line());
+                            let batch_outcome = if fail.is_empty() {
+                                Outcome::Ok
+                            } else if outcome.succeeded.is_empty() {
+                                Outcome::Error
+                            } else {
+                                Outcome::Partial
+                            };
+                            logging::info(Stream::Audit, events::CLEANUP_DELETE)
+                                .outcome(batch_outcome)
+                                .field("revision", revision)
+                                .field("requested", requested_ids.len() as u64)
+                                .field("succeeded", outcome.succeeded.len() as u64)
+                                .field("failed", fail.len() as u64)
+                                .field("succeeded_ids", outcome.succeeded.clone())
+                                .field(
+                                    "failed_ids",
+                                    fail.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+                                )
+                                .emit();
                             if fail.is_empty() {
                                 state.error_msg = None;
                             } else {
@@ -1743,9 +1827,15 @@ impl AppState {
                                     Some(SharedString::from(format!("部分失败: {sample}")));
                             }
                         }
-                        Err(e) => state.set_error(format!(
-                            "删除失败: {e}（详见 exports/xmanager.log）"
-                        )),
+                        Err(e) => {
+                            logging::error(Stream::Audit, events::CLEANUP_DELETE)
+                                .outcome(Outcome::Error)
+                                .field("revision", revision)
+                                .field("requested", n as u64)
+                                .field("error", e.as_str())
+                                .emit();
+                            state.set_error(format!("删除失败: {e}（详见 logs/）"));
+                        }
                     }
                     cx.notify();
                 })

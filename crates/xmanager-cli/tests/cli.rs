@@ -197,6 +197,45 @@ fn delete_without_ids_fails() {
 }
 
 #[test]
+fn offline_commands_write_structured_logs() {
+    let dir = tempfile::tempdir().unwrap();
+    let log_dir = dir.path().join("logs");
+    let out = dir.path().join("out.json");
+    let input = fixture("tweets.json");
+
+    bin()
+        .env("XMANAGER_LOG_DIR", &log_dir)
+        .env("XMANAGER_LOG_LEVEL", "info")
+        .args([
+            "export",
+            "--input",
+            input.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    bin()
+        .env("XMANAGER_LOG_DIR", &log_dir)
+        .env_remove("X_API_KEY")
+        .args(["delete", "--ids", "111,222"])
+        .assert()
+        .success();
+
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    let app = std::fs::read_to_string(log_dir.join(format!("xmanager-app-{today}.log"))).unwrap();
+    let audit =
+        std::fs::read_to_string(log_dir.join(format!("xmanager-audit-{today}.log"))).unwrap();
+    assert!(app.contains("\"event\":\"app.start\""));
+    assert!(app.contains("\"binary\":\"xmanager-cli\""));
+    assert!(app.contains("\"event\":\"export.write\""));
+    assert!(!app.contains("hello"));
+    assert!(audit.contains("\"event\":\"cleanup.preview\""));
+    assert!(audit.contains("\"dry_run\":true"));
+}
+
+#[test]
 #[ignore]
 fn live_whoami() {
     bin().arg("whoami").assert().success().stdout(

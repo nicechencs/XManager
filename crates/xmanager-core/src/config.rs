@@ -5,7 +5,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 /// X API credentials (OAuth 1.0a user context).
-#[derive(Debug, Clone, Default)]
+///
+/// `Debug` redacts secret material so accidental `{:?}` / log fields cannot leak tokens.
+#[derive(Clone, Default)]
 pub struct Settings {
     pub api_key: String,
     pub api_secret: String,
@@ -94,9 +96,38 @@ impl Settings {
         PathBuf::from("exports")
     }
 
-    /// Append-only API/debug log next to backups.
-    pub fn log_path() -> PathBuf {
-        Self::default_export_dir().join("xmanager.log")
+    /// Presence flags only — never the raw secret values.
+    pub fn credential_presence(&self) -> CredentialPresence {
+        CredentialPresence {
+            api_key: !self.api_key.is_empty(),
+            api_secret: !self.api_secret.is_empty(),
+            access_token: !self.access_token.is_empty(),
+            access_token_secret: !self.access_token_secret.is_empty(),
+            bearer_token: !self.bearer_token.is_empty(),
+        }
+    }
+}
+
+/// Which credential slots are non-empty. Safe to persist in logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CredentialPresence {
+    pub api_key: bool,
+    pub api_secret: bool,
+    pub access_token: bool,
+    pub access_token_secret: bool,
+    pub bearer_token: bool,
+}
+
+impl std::fmt::Debug for Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::logging::mask_secret;
+        f.debug_struct("Settings")
+            .field("api_key", &mask_secret(&self.api_key))
+            .field("api_secret", &mask_secret(&self.api_secret))
+            .field("access_token", &mask_secret(&self.access_token))
+            .field("access_token_secret", &mask_secret(&self.access_token_secret))
+            .field("bearer_token", &mask_secret(&self.bearer_token))
+            .finish()
     }
 }
 
@@ -146,5 +177,26 @@ mod tests {
         ] {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn debug_redacts_secrets() {
+        let s = Settings {
+            api_key: "key-value".into(),
+            api_secret: "secret-value".into(),
+            access_token: "token-value".into(),
+            access_token_secret: "token-secret".into(),
+            bearer_token: String::new(),
+        };
+        let rendered = format!("{s:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(rendered.contains("<empty>"));
+        assert!(!rendered.contains("key-value"));
+        assert!(!rendered.contains("secret-value"));
+        assert!(!rendered.contains("token-value"));
+        assert!(!rendered.contains("token-secret"));
+        let presence = s.credential_presence();
+        assert!(presence.api_key);
+        assert!(!presence.bearer_token);
     }
 }

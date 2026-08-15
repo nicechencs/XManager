@@ -21,6 +21,7 @@ Thumbs.db
 
 # Local exports / data
 /exports/
+/logs/
 /data/
 *.csv
 !docs/**/*.csv

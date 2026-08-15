@@ -2,6 +2,7 @@
 
 use crate::config::Settings;
 use crate::error::{Error, Result};
+use crate::logging::{self, events, Outcome, Stream};
 use crate::models::{PublicMetrics, Tweet, User};
 use oauth1_request as oauth;
 use reqwest::blocking::{Client, Response};
@@ -9,9 +10,7 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use reqwest::StatusCode;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BASE_URL: &str = "https://api.x.com/2";
 const BASE_URL_FALLBACK: &str = "https://api.twitter.com/2";
@@ -45,18 +44,36 @@ impl XClient {
 
     /// Return the authenticated user.
     pub fn get_me(&self) -> Result<User> {
+        let started = Instant::now();
         let url = format!("{BASE_URL}/users/me");
         let mut params = BTreeMap::new();
         params.insert("user.fields".into(), "id,username,name".into());
-        let data = self.request_json("GET", &url, &params)?;
+        let data = match self.request_json("GET", &url, &params) {
+            Ok(data) => data,
+            Err(err) => {
+                logging::error(Stream::App, events::ACCOUNT_WHOAMI)
+                    .outcome(Outcome::Error)
+                    .field("error", err.to_string())
+                    .field("duration_ms", started.elapsed().as_millis() as u64)
+                    .emit();
+                return Err(err);
+            }
+        };
         let user = data
             .get("data")
             .ok_or_else(|| Error::Parse("missing data in /users/me".into()))?;
-        Ok(User {
+        let user = User {
             id: json_str(user, "id")?,
             username: json_str(user, "username").unwrap_or_default(),
             name: json_str(user, "name").unwrap_or_default(),
-        })
+        };
+        logging::info(Stream::App, events::ACCOUNT_WHOAMI)
+            .outcome(Outcome::Ok)
+            .field("user_id", user.id.as_str())
+            .field("username", user.username.as_str())
+            .field("duration_ms", started.elapsed().as_millis() as u64)
+            .emit();
+        Ok(user)
     }
 
     /// Fetch user tweets with pagination until `limit` or end of timeline.
@@ -67,8 +84,10 @@ impl XClient {
         exclude_retweets: bool,
         exclude_replies: bool,
     ) -> Result<Vec<Tweet>> {
+        let started = Instant::now();
         let mut out = Vec::new();
         let mut pagination_token: Option<String> = None;
+        let mut pages = 0u32;
 
         while out.len() < limit {
             let remaining = limit - out.len();
@@ -93,7 +112,22 @@ impl XClient {
             }
 
             let url = format!("{BASE_URL}/users/{user_id}/tweets");
-            let data = self.request_json("GET", &url, &params)?;
+            let data = match self.request_json("GET", &url, &params) {
+                Ok(data) => data,
+                Err(err) => {
+                    logging::error(Stream::App, events::TIMELINE_FETCH)
+                        .outcome(Outcome::Error)
+                        .field("user_id", user_id)
+                        .field("limit", limit as u64)
+                        .field("pages", pages)
+                        .field("count", out.len() as u64)
+                        .field("error", err.to_string())
+                        .field("duration_ms", started.elapsed().as_millis() as u64)
+                        .emit();
+                    return Err(err);
+                }
+            };
+            pages += 1;
 
             let items = data
                 .get("data")
@@ -123,6 +157,16 @@ impl XClient {
             }
         }
 
+        logging::info(Stream::App, events::TIMELINE_FETCH)
+            .outcome(Outcome::Ok)
+            .field("user_id", user_id)
+            .field("limit", limit as u64)
+            .field("count", out.len() as u64)
+            .field("pages", pages)
+            .field("exclude_retweets", exclude_retweets)
+            .field("exclude_replies", exclude_replies)
+            .field("duration_ms", started.elapsed().as_millis() as u64)
+            .emit();
         Ok(out)
     }
 
@@ -143,14 +187,36 @@ impl XClient {
     pub fn delete_tweet(&self, tweet_id: &str) -> Result<bool> {
         let url = format!("{BASE_URL}/tweets/{tweet_id}");
         let params = BTreeMap::new();
-        let data = self.request_json("DELETE", &url, &params)?;
-        match deleted_flag(&data) {
-            Ok(flag) => Ok(flag),
+        let data = match self.request_json("DELETE", &url, &params) {
+            Ok(data) => data,
             Err(err) => {
-                api_log(&format!(
-                    "DELETE {tweet_id} parse fail: {err}; body={}",
-                    data
-                ));
+                logging::error(Stream::Audit, events::TWEET_DELETE)
+                    .outcome(Outcome::Error)
+                    .field("tweet_id", tweet_id)
+                    .field("error", err.to_string())
+                    .emit();
+                return Err(err);
+            }
+        };
+        match deleted_flag(&data) {
+            Ok(deleted) => {
+                logging::info(Stream::Audit, events::TWEET_DELETE)
+                    .outcome(if deleted {
+                        Outcome::Ok
+                    } else {
+                        Outcome::Error
+                    })
+                    .field("tweet_id", tweet_id)
+                    .field("deleted", deleted)
+                    .emit();
+                Ok(deleted)
+            }
+            Err(err) => {
+                logging::error(Stream::Audit, events::TWEET_DELETE)
+                    .outcome(Outcome::Error)
+                    .field("tweet_id", tweet_id)
+                    .field("error", err.to_string())
+                    .emit();
                 Err(err)
             }
         }
@@ -206,6 +272,17 @@ impl XClient {
             failed.extend(classified.failed);
         }
 
+        logging::info(Stream::App, events::TWEET_LOOKUP)
+            .outcome(if failed.is_empty() {
+                Outcome::Ok
+            } else {
+                Outcome::Partial
+            })
+            .field("requested", ids.len() as u64)
+            .field("found", found.len() as u64)
+            .field("missing", missing.len() as u64)
+            .field("failed", failed.len() as u64)
+            .emit();
         Ok(TweetLookup {
             found,
             missing,
@@ -238,10 +315,29 @@ impl XClient {
         params: &BTreeMap<String, String>,
         allow_partial_errors: bool,
     ) -> Result<Value> {
-        let response = self.send(method, url, params)?;
+        let started = Instant::now();
+        let response = match self.send(method, url, params) {
+            Ok(response) => response,
+            Err(err) => {
+                logging::error(Stream::App, events::API_REQUEST)
+                    .outcome(Outcome::Error)
+                    .field("http_method", method)
+                    .field("url", logging::sanitize_url(url))
+                    .field("error", err.to_string())
+                    .field("duration_ms", started.elapsed().as_millis() as u64)
+                    .emit();
+                return Err(err);
+            }
+        };
 
         if response.status() == StatusCode::TOO_MANY_REQUESTS {
             let retry_after_secs = rate_limit_sleep_secs(&response);
+            logging::warn(Stream::App, events::API_RATE_LIMITED)
+                .field("http_method", method)
+                .field("url", logging::sanitize_url(url))
+                .field("sleep_secs", retry_after_secs)
+                .field("retry", false)
+                .emit();
             return Err(Error::RateLimited { retry_after_secs });
         }
 
@@ -249,39 +345,84 @@ impl XClient {
         let body = response
             .text()
             .map_err(|e| Error::Network(e.to_string()))?;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let url_path = logging::sanitize_url(url);
 
         if status == StatusCode::NO_CONTENT || body.trim().is_empty() {
             if status.is_success() {
+                logging::debug(Stream::App, events::API_REQUEST)
+                    .outcome(Outcome::Ok)
+                    .field("http_method", method)
+                    .field("url", url_path)
+                    .field("http_status", status.as_u16())
+                    .field("duration_ms", duration_ms)
+                    .emit();
                 return Ok(Value::Null);
             }
+            logging::error(Stream::App, events::API_REQUEST)
+                .outcome(Outcome::Error)
+                .field("http_method", method)
+                .field("url", url_path)
+                .field("http_status", status.as_u16())
+                .field("error", "empty body")
+                .field("duration_ms", duration_ms)
+                .emit();
             return Err(Error::api(status.as_u16(), "empty body"));
         }
 
-        let data: Value = serde_json::from_str(&body).map_err(|e| {
-            Error::Parse(format!(
-                "invalid JSON (HTTP {}): {e}; body={}",
-                status.as_u16(),
-                truncate(&body, 200)
-            ))
-        })?;
+        let data: Value = match serde_json::from_str(&body) {
+            Ok(data) => data,
+            Err(e) => {
+                let msg = format!(
+                    "invalid JSON (HTTP {}): {e}; body={}",
+                    status.as_u16(),
+                    truncate(&body, 200)
+                );
+                logging::error(Stream::App, events::API_REQUEST)
+                    .outcome(Outcome::Error)
+                    .field("http_method", method)
+                    .field("url", url_path)
+                    .field("http_status", status.as_u16())
+                    .field("error", msg.as_str())
+                    .field("duration_ms", duration_ms)
+                    .emit();
+                return Err(Error::Parse(msg));
+            }
+        };
 
         if !status.is_success() {
             let msg = format_api_error(&data, status.as_u16());
-            api_log(&format!(
-                "HTTP {} body={}",
-                status.as_u16(),
-                truncate(&body, 400)
-            ));
+            logging::error(Stream::App, events::API_REQUEST)
+                .outcome(Outcome::Error)
+                .field("http_method", method)
+                .field("url", url_path.as_str())
+                .field("http_status", status.as_u16())
+                .field("error", msg.as_str())
+                .field("duration_ms", duration_ms)
+                .emit();
             return Err(Error::api(status.as_u16(), msg));
         }
 
         if !allow_partial_errors && has_errors_without_usable_data(&data) {
-            return Err(Error::api(
-                status.as_u16(),
-                format_api_error(&data, status.as_u16()),
-            ));
+            let msg = format_api_error(&data, status.as_u16());
+            logging::error(Stream::App, events::API_REQUEST)
+                .outcome(Outcome::Error)
+                .field("http_method", method)
+                .field("url", url_path.as_str())
+                .field("http_status", status.as_u16())
+                .field("error", msg.as_str())
+                .field("duration_ms", duration_ms)
+                .emit();
+            return Err(Error::api(status.as_u16(), msg));
         }
 
+        logging::debug(Stream::App, events::API_REQUEST)
+            .outcome(Outcome::Ok)
+            .field("http_method", method)
+            .field("url", url_path)
+            .field("http_status", status.as_u16())
+            .field("duration_ms", duration_ms)
+            .emit();
         Ok(data)
     }
 
@@ -295,18 +436,32 @@ impl XClient {
         for candidate in candidate_urls(url) {
             match self.send_once(method, &candidate, params) {
                 Ok(response) => {
-                    api_log(&format!(
-                        "{method} {candidate} -> HTTP {}",
-                        response.status().as_u16()
-                    ));
+                    logging::debug(Stream::App, events::API_REQUEST)
+                        .outcome(Outcome::Ok)
+                        .field("http_method", method)
+                        .field("url", logging::sanitize_url(&candidate))
+                        .field("http_status", response.status().as_u16())
+                        .field("host_fallback", candidate != url)
+                        .emit();
                     return Ok(response);
                 }
                 Err(err) if matches!(err, Error::Network(_)) => {
-                    api_log(&format!("{method} {candidate} -> {err}"));
+                    logging::warn(Stream::App, events::API_REQUEST)
+                        .outcome(Outcome::Error)
+                        .field("http_method", method)
+                        .field("url", logging::sanitize_url(&candidate))
+                        .field("error", err.to_string())
+                        .field("will_fallback", true)
+                        .emit();
                     last_network = Some(err);
                 }
                 Err(err) => {
-                    api_log(&format!("{method} {candidate} -> {err}"));
+                    logging::error(Stream::App, events::API_REQUEST)
+                        .outcome(Outcome::Error)
+                        .field("http_method", method)
+                        .field("url", logging::sanitize_url(&candidate))
+                        .field("error", err.to_string())
+                        .emit();
                     return Err(err);
                 }
             }
@@ -361,18 +516,6 @@ fn candidate_urls(url: &str) -> Vec<String> {
         return vec![url.to_string()];
     };
     vec![url.to_string(), alt]
-}
-
-fn api_log(message: &str) {
-    let path = Settings::log_path();
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) else {
-        return;
-    };
-    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-    let _ = writeln!(file, "{ts} {message}");
 }
 
 fn sign_oauth1(

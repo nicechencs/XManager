@@ -15,3 +15,4 @@ xmanager-core.workspace = true
 anyhow.workspace = true
 gpui.workspace = true
 chrono.workspace = true
+serde.workspace = true

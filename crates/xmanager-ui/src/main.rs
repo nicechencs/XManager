@@ -10,6 +10,7 @@ use gpui::{
     prelude::*, px, size, App, Application, Bounds, Context, TitlebarOptions, Window, WindowBounds,
     WindowOptions,
 };
+use xmanager_core::logging::{self, events, Outcome, Stream};
 
 impl Render for AppState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -24,6 +25,17 @@ impl Render for AppState {
 }
 
 fn main() {
+    let logging_ok = logging::init_best_effort();
+    logging::info(Stream::App, events::APP_START)
+        .outcome(if logging_ok {
+            Outcome::Ok
+        } else {
+            Outcome::Error
+        })
+        .field("version", env!("CARGO_PKG_VERSION"))
+        .field("file_logging", logging_ok)
+        .emit();
+
     Application::new().run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
         cx.open_window(

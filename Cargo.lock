@@ -7233,6 +7233,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "gpui",
+ "serde",
  "xmanager-core",
 ]
 

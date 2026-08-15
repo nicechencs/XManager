@@ -11,6 +11,7 @@ XManager domain library: X API v2 client (OAuth 1.0a), tweet models, filtering, 
 | `models` | `Tweet`, `User`, `PublicMetrics` |
 | `filter` | `filter_tweets`, `summarize`, histogram buckets |
 | `export` | `export_csv` / `export_json` / `export_auto` / `parse_tweets_json` |
+| `logging` | JSONL file logger: `app` (14d) + `audit` (90d) |
 
 命令行入口：`cargo run -p xmanager-cli -- --help`。
 

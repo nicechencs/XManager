@@ -1,6 +1,7 @@
 //! Export tweets to CSV / JSON.
 
 use crate::error::{Error, Result};
+use crate::logging::{self, events, Outcome, Stream};
 use crate::models::Tweet;
 use serde_json::Value;
 use std::fs::{self, File};
@@ -52,7 +53,14 @@ pub fn export_csv(tweets: &[Tweet], path: impl AsRef<Path>) -> Result<PathBuf> {
         ])?;
     }
     wtr.flush()?;
-    Ok(path.to_path_buf())
+    let resolved = path.to_path_buf();
+    logging::info(Stream::App, events::EXPORT_WRITE)
+        .outcome(Outcome::Ok)
+        .field("format", "csv")
+        .field("count", tweets.len() as u64)
+        .field("path", resolved.display().to_string())
+        .emit();
+    Ok(resolved)
 }
 
 /// Write tweets to a JSON file (array of objects). Returns the resolved path.
@@ -94,7 +102,14 @@ pub fn export_json(tweets: &[Tweet], path: impl AsRef<Path>) -> Result<PathBuf> 
     let body = serde_json::to_string_pretty(&payload)?;
     file.write_all(body.as_bytes())?;
     file.write_all(b"\n")?;
-    Ok(path.to_path_buf())
+    let resolved = path.to_path_buf();
+    logging::info(Stream::App, events::EXPORT_WRITE)
+        .outcome(Outcome::Ok)
+        .field("format", "json")
+        .field("count", tweets.len() as u64)
+        .field("path", resolved.display().to_string())
+        .emit();
+    Ok(resolved)
 }
 
 /// Parse tweets from JSON used by the CLI and tests.
