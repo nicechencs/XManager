@@ -1,0 +1,21 @@
+[package]
+name = "xmanager-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "X (Twitter) API client and tweet filtering domain logic for XManager"
+readme = "README.md"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+csv.workspace = true
+dotenvy.workspace = true
+oauth1-request.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

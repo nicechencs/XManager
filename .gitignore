@@ -1,0 +1,35 @@
+# Rust
+/target/
+**/target/
+# Keep Cargo.lock for binary workspace
+# Cargo.lock
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local exports / data
+/exports/
+/data/
+*.csv
+!docs/**/*.csv
+
+# Claude / local tooling
+.claude/
+.codegraph/
+
+# Transient UI captures dropped at repo root (canonical shots live in docs/screenshots/)
+/current-ui.png
+/design-comparison*.png
+/implementation-*.png
