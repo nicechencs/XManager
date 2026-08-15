@@ -1,0 +1,17 @@
+[package]
+name = "xmanager-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "XManager desktop UI (GPUI) for low-view tweet management"
+default-run = "xmanager"
+
+[[bin]]
+name = "xmanager"
+path = "src/main.rs"
+
+[dependencies]
+xmanager-core.workspace = true
+anyhow.workspace = true
+gpui.workspace = true
+chrono.workspace = true

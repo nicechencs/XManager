@@ -2,8 +2,9 @@
 resolver = "2"
 members = [
     "crates/xmanager-core",
+    "crates/xmanager-ui",
 ]
-default-members = ["crates/xmanager-core"]
+default-members = ["crates/xmanager-ui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,3 +24,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+gpui = "0.2.2"
