@@ -79,7 +79,7 @@ fn kpi(label: &str, value: impl Into<String>) -> Div {
 }
 
 pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let can_fetch = !state.loading && state.credentials_ok;
+    let can_fetch = !state.loading;
     let s = &state.summary;
     div()
         .flex()
@@ -123,11 +123,20 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         .gap_2()
                         .child(btn(
                             "library-export-csv",
-                            "导出当前结果",
+                            "导出 CSV",
                             false,
                             !state.loading && !state.filtered.is_empty(),
                             cx.listener(|this, _, window, cx| {
                                 this.export_tweets(ExportFormat::Csv, window, cx)
+                            }),
+                        ))
+                        .child(btn(
+                            "library-export-json",
+                            "导出 JSON",
+                            false,
+                            !state.loading && !state.filtered.is_empty(),
+                            cx.listener(|this, _, window, cx| {
+                                this.export_tweets(ExportFormat::Json, window, cx)
                             }),
                         ))
                         .child(btn(
@@ -179,31 +188,18 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 }),
             ),
         ]))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_1()
-                .children({
-                    let enabled = !state.loading;
-                    state
-                        .applied_chips()
-                        .into_iter()
-                        .enumerate()
-                        .map(move |(idx, chip)| {
-                            let label = chip_label(&chip);
-                            removable_chip(
-                                format!("applied-chip-{idx}"),
-                                label,
-                                chip,
-                                enabled,
-                                cx,
-                            )
-                            .into_any_element()
-                        })
-                }),
-        )
+        .child(div().flex().flex_row().flex_wrap().gap_1().children({
+            let enabled = !state.loading;
+            state
+                .applied_chips()
+                .into_iter()
+                .enumerate()
+                .map(move |(idx, chip)| {
+                    let label = chip_label(&chip);
+                    removable_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx)
+                        .into_any_element()
+                })
+        }))
         .child(
             div()
                 .flex()
@@ -227,6 +223,8 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
 
 pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
     let has_selection = !state.selected.is_empty();
+    let has_focus = state.focused_tweet_id.is_some();
+    let can_stage = has_selection || has_focus;
     div()
         .flex()
         .flex_row()
@@ -241,15 +239,17 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             div()
                 .text_sm()
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(if has_selection {
+                .text_color(if can_stage {
                     theme::c(theme::TEXT)
                 } else {
                     theme::c(theme::TEXT_MUTED)
                 })
                 .child(if has_selection {
                     format!("已选 {} 条", state.selected.len())
+                } else if has_focus {
+                    "已查看当前推文，可加入安全清理".into()
                 } else {
-                    "选择内容后加入安全清理".into()
+                    "勾选左侧方框，或点开一条后加入安全清理".into()
                 }),
         )
         .child(btn(
@@ -278,7 +278,7 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             "add-cleanup-btn",
             "加入安全清理",
             true,
-            !state.loading && has_selection,
+            !state.loading && can_stage,
             cx.listener(|this, _, _window, cx| this.add_selected_to_cleanup(cx)),
         ))
 }

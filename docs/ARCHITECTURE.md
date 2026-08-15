@@ -46,8 +46,9 @@ XManager/
 - **路由**：`Library | Insights | Cleanup`（共享 `AppState`，切页不丢筛选/候选）。
 - **筛选**：抽屉草稿 `filter_draft` vs 已生效 `applied_filter`；chip 可逐个移除。
 - **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。
-- **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步；窄屏默认无检查器，聚焦推文时打开覆盖列。
+- **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
 - **列表**：`uniform_list` 虚拟化渲染筛选结果。
+- **洞察**：KPI + 直方图 + 当前筛选 Top-N 排名（点击回内容库并聚焦）。
 
 ## 数据流
 
@@ -55,7 +56,8 @@ XManager/
 .env → Settings → XClient
                     ├─ get_me()
                     ├─ fetch_own_tweets(limit, exclude_rt, exclude_replies)
-                    └─ delete_tweet(id)
+                    ├─ lookup_tweets(ids)   # 预演：可删 / 缺失 / 失败
+                    └─ delete_tweet(id)     # 429 立即停，不再连删连睡
 
 tweets[] → FilterOptions
             (time_range / kinds / rates / top_n / max_views …)
@@ -72,9 +74,11 @@ tweets[] → FilterOptions
 | 时间段 / 类型 / 比率排序 | `TimeRange` `KindFilter` `SortField` | 筛选抽屉 + 可移除 chip |
 | 低曝光筛选 | `FilterOptions` | ≤10/20/50/100 快捷 |
 | 统计 | `summarize` / histogram | 数据洞察；直方图可点筛选 |
+| 排名 | 当前 `filtered` 顺序 | 洞察 Top-N 列表，点击回内容库 |
 | 导出 | `export_csv` / `export_json` | 内容库 / 洞察 / 清理备份 |
-| 安全删除 | `delete_tweet(s)` | 候选 → 备份 → 预演 → 二次确认 → 真删 |
-| 响应式 | — | `LayoutMode` Wide/Medium/Narrow |
+| 安全删除 | `lookup_tweets` + `delete_tweet(s)` | 自动备份 → API 预演 → chip 二次确认 → 真删 |
+| 外观 | — | 侧栏浅色/深色 |
+| 响应式 | — | Wide 三栏；Medium 紧凑导航；Narrow 覆盖层 + 卡片 |
 | 命令行自动化 | `xmanager-cli` | — |
 
 `xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上 GPUI 二进制没有控制台，所以 CLI 是独立 crate。

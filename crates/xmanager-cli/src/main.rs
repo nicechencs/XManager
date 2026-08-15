@@ -476,10 +476,23 @@ fn fail(exit: u8, code: &str, mut payload: Value) -> u8 {
 
 fn api_fail(e: xmanager_core::Error) -> Result<(), u8> {
     use xmanager_core::Error;
-    let (exit, code) = match e {
-        Error::MissingCredentials(_) => (EXIT_CREDS, "missing_credentials"),
-        Error::Api { .. } | Error::Network(_) | Error::RateLimited { .. } => (EXIT_API, "api"),
-        _ => (EXIT_ERROR, "error"),
-    };
-    Err(fail(exit, code, json!({ "error": e.to_string() })))
+    match e {
+        Error::MissingCredentials(_) => Err(fail(
+            EXIT_CREDS,
+            "missing_credentials",
+            json!({ "error": e.to_string() }),
+        )),
+        Error::RateLimited { retry_after_secs } => Err(fail(
+            EXIT_API,
+            "rate_limited",
+            json!({
+                "error": e.to_string(),
+                "retry_after_secs": retry_after_secs
+            }),
+        )),
+        Error::Api { .. } | Error::Network(_) => {
+            Err(fail(EXIT_API, "api", json!({ "error": e.to_string() })))
+        }
+        _ => Err(fail(EXIT_ERROR, "error", json!({ "error": e.to_string() }))),
+    }
 }

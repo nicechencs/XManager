@@ -7,7 +7,7 @@ pub mod export;
 pub mod filter;
 pub mod models;
 
-pub use client::XClient;
+pub use client::{TweetLookup, XClient};
 pub use config::Settings;
 pub use error::{Error, Result};
 pub use export::{export_auto, export_csv, export_json, load_tweets_file, parse_tweets_json};

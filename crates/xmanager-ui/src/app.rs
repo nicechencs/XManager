@@ -3,11 +3,11 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
-use gpui::{AsyncApp, Context, PromptButton, PromptLevel, SharedString, WeakEntity, Window};
+use gpui::{AsyncApp, Context, SharedString, UniformListScrollHandle, WeakEntity, Window};
 use xmanager_core::{
     export_csv, export_json, filter_tweets, summarize, view_bucket_bounds, view_histogram,
-    FilterOptions, KindFilter, Settings, SortField, SortOrder, Summary, TimeRange, Tweet, User,
-    XClient,
+    FilterOptions, KindFilter, Settings, SortField, SortOrder, Summary, TimeRange, Tweet,
+    TweetLookup, User, XClient,
 };
 
 /// Responsive shell breakpoints matching the guided-cleanup workspace spec.
@@ -44,24 +44,44 @@ impl LayoutMode {
         matches!(self, Self::Wide)
     }
 
-    /// Permanent inspector column (hidden on narrow until a tweet is focused).
+    /// Permanent inspector column (Wide/Medium only).
     pub fn show_inspector(self) -> bool {
         !matches!(self, Self::Narrow)
     }
 
-    /// Width used when the inspector column or focus overlay is visible.
+    /// Width used by the Wide/Medium inspector column.
+    /// Narrow overlay ignores this and uses `flex_1` / 100% width.
     pub fn inspector_width(self) -> f32 {
         match self {
             Self::Wide => 380.0,
             Self::Medium => 300.0,
-            // Narrow uses a compact overlay when a tweet is focused.
             Self::Narrow => 280.0,
         }
     }
 
-    /// Whether the library should render the inspector right now.
-    pub fn library_shows_inspector(self, has_focus: bool) -> bool {
-        self.show_inspector() || has_focus
+    /// Side-column inspector: Wide only. Medium/Narrow use an overlay drawer.
+    pub fn library_shows_inspector(self, _has_focus: bool) -> bool {
+        matches!(self, Self::Wide)
+    }
+
+    /// Narrow replaces the list with a full-height filter overlay.
+    pub fn filter_as_overlay(self) -> bool {
+        matches!(self, Self::Narrow)
+    }
+
+    /// Medium/Narrow show the inspector as a full-height overlay when focused.
+    pub fn inspector_as_overlay(self) -> bool {
+        matches!(self, Self::Medium | Self::Narrow)
+    }
+
+    /// Narrow tweet rows are labeled cards instead of a compact table.
+    pub fn tweet_list_as_cards(self) -> bool {
+        matches!(self, Self::Narrow)
+    }
+
+    /// Narrow cleanup stepper stacks the four step cards vertically.
+    pub fn stack_cleanup_steps(self) -> bool {
+        matches!(self, Self::Narrow)
     }
 
     pub fn label_zh(self) -> &'static str {
@@ -71,6 +91,20 @@ impl LayoutMode {
             Self::Narrow => "窄屏",
         }
     }
+}
+
+/// Drag state for the library list / inspector splitter.
+#[derive(Debug, Clone, Copy)]
+pub struct SplitDrag {
+    pub start_x: f32,
+    pub start_inspector_width: f32,
+}
+
+pub const INSPECTOR_WIDTH_MIN: f32 = 220.0;
+pub const INSPECTOR_WIDTH_MAX: f32 = 640.0;
+
+pub fn clamp_inspector_width(width: f32) -> f32 {
+    width.clamp(INSPECTOR_WIDTH_MIN, INSPECTOR_WIDTH_MAX)
 }
 
 /// Structured dry-run outcome for the cleanup workflow.
@@ -154,6 +188,38 @@ pub fn classify_preview(
     }
 }
 
+/// Map an X API tweet lookup onto the current cleanup candidate set.
+pub fn preview_from_lookup(
+    candidate_ids: &HashSet<String>,
+    lookup: &TweetLookup,
+    revision: u64,
+) -> PreviewOutcome {
+    let found: HashSet<String> = lookup.found.iter().map(|t| t.id.clone()).collect();
+    let missing_set: HashSet<String> = lookup.missing.iter().cloned().collect();
+    let mut failed = lookup.failed.clone();
+    let mut deletable = Vec::new();
+    let mut missing = lookup.missing.clone();
+    for id in candidate_ids {
+        if found.contains(id) {
+            deletable.push(id.clone());
+        } else if missing_set.contains(id) {
+            continue;
+        } else if !failed.iter().any(|(fid, _)| fid == id) {
+            failed.push((id.clone(), "lookup did not return this id".into()));
+        }
+    }
+    deletable.sort();
+    missing.sort();
+    failed.sort_by(|a, b| a.0.cmp(&b.0));
+    PreviewOutcome {
+        revision,
+        total: candidate_ids.len(),
+        deletable,
+        missing,
+        failed,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
     Library,
@@ -173,15 +239,30 @@ pub enum DeleteConfirmToken {
 pub struct DeleteConfirm {
     pub expected_count: usize,
     pub selected: Option<DeleteConfirmToken>,
+    /// Free-text confirm: exact count or the word DELETE (any case).
+    pub typed: String,
 }
 
-/// Whether the chosen token unlocks real deletion for `expected_count` candidates.
+/// Chip or typed count/`DELETE` unlocks real deletion.
 pub fn delete_confirm_ready(confirm: &DeleteConfirm) -> bool {
-    confirm.expected_count > 0
-        && matches!(
-            confirm.selected,
-            Some(DeleteConfirmToken::Count | DeleteConfirmToken::DeleteWord)
-        )
+    if confirm.expected_count == 0 {
+        return false;
+    }
+    if matches!(
+        confirm.selected,
+        Some(DeleteConfirmToken::Count | DeleteConfirmToken::DeleteWord)
+    ) {
+        return true;
+    }
+    typed_delete_confirm_matches(&confirm.typed, confirm.expected_count)
+}
+
+pub fn typed_delete_confirm_matches(typed: &str, expected_count: usize) -> bool {
+    let t = typed.trim();
+    if t.is_empty() {
+        return false;
+    }
+    t.eq_ignore_ascii_case("DELETE") || t == expected_count.to_string()
 }
 
 /// Removable applied-filter chips shown in the Library toolbar.
@@ -191,6 +272,7 @@ pub enum AppliedFilterChip {
     MaxViews(u64),
     MinViews(u64),
     MaxEngagement(u64),
+    OlderThanDays(u64),
     TopN(usize),
     Sort(String),
     Order(String),
@@ -211,6 +293,9 @@ pub fn applied_filter_chips(filter: &FilterOptions) -> Vec<AppliedFilterChip> {
     }
     if let Some(v) = filter.max_engagement {
         chips.push(AppliedFilterChip::MaxEngagement(v));
+    }
+    if let Some(d) = filter.older_than_days {
+        chips.push(AppliedFilterChip::OlderThanDays(d));
     }
     if let Some(n) = filter.top_n {
         chips.push(AppliedFilterChip::TopN(n));
@@ -249,6 +334,7 @@ pub fn chip_label(chip: &AppliedFilterChip) -> String {
         AppliedFilterChip::MaxViews(v) => format!("曝光 ≤ {v}"),
         AppliedFilterChip::MinViews(v) => format!("曝光 ≥ {v}"),
         AppliedFilterChip::MaxEngagement(v) => format!("互动 ≤ {v}"),
+        AppliedFilterChip::OlderThanDays(d) => format!("早于 {d} 天"),
         AppliedFilterChip::TopN(n) => format!("Top {n}"),
         AppliedFilterChip::Sort(label) => format!("排序：{label}"),
         AppliedFilterChip::Order(label) => label.clone(),
@@ -268,6 +354,46 @@ pub fn receipt_matches(
     candidates: &HashSet<String>,
 ) -> bool {
     receipt.is_some_and(|value| value.revision == revision && value.candidate_ids == *candidates)
+}
+
+/// Checkbox selection wins; if nothing is checked, the focused tweet still counts.
+pub fn ids_for_cleanup_staging(
+    selected: &HashSet<String>,
+    focused_tweet_id: Option<&str>,
+) -> Vec<String> {
+    if !selected.is_empty() {
+        return selected.iter().cloned().collect();
+    }
+    focused_tweet_id
+        .filter(|id| !id.is_empty())
+        .map(|id| vec![id.to_owned()])
+        .unwrap_or_default()
+}
+
+/// Next action the operator should take on the cleanup route.
+pub fn cleanup_next_hint(
+    candidate_count: usize,
+    credentials_ok: bool,
+    has_backup: bool,
+    has_preview: bool,
+    confirm: Option<&DeleteConfirm>,
+) -> String {
+    if candidate_count == 0 {
+        return "在内容库勾选推文（左侧方框），或点开一条后点「加入安全清理」。".into();
+    }
+    if !credentials_ok {
+        return "已有候选，但缺少有效 OAuth 凭证，无法真实删除。".into();
+    }
+    if confirm.is_some() {
+        if confirm.is_some_and(delete_confirm_ready) {
+            return "已解锁。点「确认并删除」将永久删除这些推文。".into();
+        }
+        return "请选择「确认数量」或「DELETE」，然后点「确认并删除」。".into();
+    }
+    if has_backup && has_preview {
+        return "备份和预演已就绪。点「真实删除」，再选择确认方式。".into();
+    }
+    "点「真实删除」会自动备份、预演，然后请你二次确认。".into()
 }
 
 /// Refresh only the cached content that the bounded API response actually includes.
@@ -342,6 +468,23 @@ impl Default for FilterDraft {
 }
 
 impl FilterDraft {
+    /// No view/kind/time restrictions. Used by「清除筛选」.
+    pub fn unrestricted() -> Self {
+        Self {
+            max_views: None,
+            min_views: None,
+            max_engagement: None,
+            older_than_days: None,
+            newer_than_days: None,
+            time_range: TimeRange::All,
+            kinds: KindFilter::all(),
+            include_retweets: true,
+            sort: SortField::Views,
+            order: SortOrder::Asc,
+            top_n: None,
+        }
+    }
+
     pub fn to_filter_options(&self) -> FilterOptions {
         FilterOptions {
             max_views: self.max_views,
@@ -409,6 +552,11 @@ pub struct AppState {
     pub last_synced_at: Option<SharedString>,
     /// Current responsive shell mode (updated from window viewport).
     pub layout_mode: LayoutMode,
+    /// Survives route remounts so the library list keeps its scroll offset.
+    pub library_scroll: UniformListScrollHandle,
+    /// User-resized inspector column; leftover width is the tweet list.
+    pub inspector_width_px: f32,
+    pub split_drag: Option<SplitDrag>,
 }
 
 impl AppState {
@@ -459,7 +607,47 @@ impl AppState {
             histogram: Vec::new(),
             last_synced_at: None,
             layout_mode: LayoutMode::Wide,
+            library_scroll: UniformListScrollHandle::default(),
+            inspector_width_px: LayoutMode::Wide.inspector_width(),
+            split_drag: None,
         }
+    }
+
+    pub fn effective_inspector_width(&self) -> f32 {
+        clamp_inspector_width(self.inspector_width_px)
+    }
+
+    pub fn begin_split_drag(&mut self, x: f32, cx: &mut Context<Self>) {
+        self.split_drag = Some(SplitDrag {
+            start_x: x,
+            start_inspector_width: self.effective_inspector_width(),
+        });
+        cx.notify();
+    }
+
+    pub fn update_split_drag(&mut self, x: f32, cx: &mut Context<Self>) {
+        let Some(drag) = self.split_drag else {
+            return;
+        };
+        // Handle sits on the list's right edge: drag right → list grows → inspector shrinks.
+        let next = drag.start_inspector_width - (x - drag.start_x);
+        let clamped = clamp_inspector_width(next);
+        if (clamped - self.inspector_width_px).abs() >= 0.5 {
+            self.inspector_width_px = clamped;
+            cx.notify();
+        }
+    }
+
+    pub fn end_split_drag(&mut self, cx: &mut Context<Self>) {
+        if self.split_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub fn reset_split_width(&mut self, cx: &mut Context<Self>) {
+        self.inspector_width_px = self.layout_mode.inspector_width();
+        self.split_drag = None;
+        cx.notify();
     }
 
     /// True when the drawer draft differs from the currently applied filter.
@@ -484,6 +672,7 @@ impl AppState {
             AppliedFilterChip::MaxViews(_) => self.filter_draft.max_views = None,
             AppliedFilterChip::MinViews(_) => self.filter_draft.min_views = None,
             AppliedFilterChip::MaxEngagement(_) => self.filter_draft.max_engagement = None,
+            AppliedFilterChip::OlderThanDays(_) => self.filter_draft.older_than_days = None,
             AppliedFilterChip::TopN(_) => self.filter_draft.top_n = None,
             AppliedFilterChip::Sort(_) => {
                 self.filter_draft.sort = SortField::Views;
@@ -629,9 +818,10 @@ impl AppState {
         self.delete_confirm = Some(DeleteConfirm {
             expected_count: n,
             selected: None,
+            typed: String::new(),
         });
         self.status_msg = SharedString::from(format!(
-            "请确认删除 {n} 条：选择「确认数量 {n}」或「DELETE」"
+            "请确认删除 {n} 条：输入 {n} 或 DELETE，或点选确认方式"
         ));
         self.error_msg = None;
         cx.notify();
@@ -651,6 +841,30 @@ impl AppState {
     ) {
         if let Some(confirm) = self.delete_confirm.as_mut() {
             confirm.selected = Some(token);
+            cx.notify();
+        }
+    }
+
+    pub fn push_delete_confirm_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if let Some(confirm) = self.delete_confirm.as_mut() {
+            confirm.selected = None;
+            for ch in text.chars() {
+                if ch.is_control() {
+                    continue;
+                }
+                if confirm.typed.len() >= 32 {
+                    break;
+                }
+                confirm.typed.push(ch);
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn backspace_delete_confirm(&mut self, cx: &mut Context<Self>) {
+        if let Some(confirm) = self.delete_confirm.as_mut() {
+            confirm.selected = None;
+            confirm.typed.pop();
             cx.notify();
         }
     }
@@ -685,6 +899,11 @@ impl AppState {
         if self.cleanup_candidates.remove(id) {
             self.cleanup_snapshot.remove(id);
             self.invalidate_cleanup_receipts();
+            if self.focused_tweet_id.as_deref() == Some(id)
+                && resolve_focused_tweet(id, &self.filtered, &self.cleanup_snapshot).is_none()
+            {
+                self.focused_tweet_id = None;
+            }
             self.status_msg = SharedString::from(format!(
                 "已移除候选（{} 条）",
                 self.cleanup_candidates.len()
@@ -705,11 +924,17 @@ impl AppState {
     }
 
     pub fn add_selected_to_cleanup(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.selected.is_empty() {
+        if self.loading {
+            return;
+        }
+        let selected_ids =
+            ids_for_cleanup_staging(&self.selected, self.focused_tweet_id.as_deref());
+        if selected_ids.is_empty() {
+            self.set_error("请先勾选推文，或点开一条再加入安全清理");
+            cx.notify();
             return;
         }
         let before = self.cleanup_candidates.len();
-        let selected_ids: Vec<String> = self.selected.iter().cloned().collect();
         self.cleanup_candidates.extend(selected_ids.iter().cloned());
         for id in selected_ids {
             if let Some(tweet) = self.all_tweets.iter().find(|tweet| tweet.id == id) {
@@ -720,11 +945,147 @@ impl AppState {
             self.invalidate_cleanup_receipts();
         }
         self.status_msg = SharedString::from(format!(
-            "安全清理候选：{} 条",
+            "安全清理候选：{} 条。点「真实删除」即可备份、预演并确认。",
             self.cleanup_candidates.len()
         ));
         self.active_route = Route::Cleanup;
         cx.notify();
+    }
+
+    /// Write a CSV backup under `exports/` and bind a receipt. Idempotent when
+    /// a matching backup already exists.
+    pub fn ensure_backup_for_current_candidates(&mut self) -> Result<String, String> {
+        if self.has_valid_backup() {
+            return Ok("already-backed-up".into());
+        }
+        let tweets = self.cleanup_tweets();
+        if tweets.is_empty() {
+            return Err("暂无安全清理候选".into());
+        }
+        let dir = Settings::default_export_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建导出目录: {e}"))?;
+        let path = dir.join(format!(
+            "xmanager_cleanup_{}.csv",
+            Local::now().format("%Y%m%d_%H%M%S")
+        ));
+        let written = export_csv(&tweets, &path).map_err(|e| e.to_string())?;
+        self.backup_receipt = Some(Receipt {
+            revision: self.cleanup_revision,
+            candidate_ids: self.cleanup_candidates.clone(),
+        });
+        Ok(written.display().to_string())
+    }
+
+    /// Local dry-run against the current cache/snapshot. Does not call the API.
+    pub fn run_local_preview(&mut self) -> Result<PreviewOutcome, String> {
+        if self.cleanup_candidates.is_empty() {
+            return Err("请先加入安全清理候选".into());
+        }
+        if !self.has_valid_backup() {
+            return Err("请先为当前候选创建备份".into());
+        }
+        let snapshot = self.cleanup_candidates.clone();
+        let revision = self.cleanup_revision;
+        let known: HashSet<String> = self
+            .all_tweets
+            .iter()
+            .map(|t| t.id.clone())
+            .chain(self.cleanup_snapshot.keys().cloned())
+            .collect();
+        let outcome = classify_preview(&snapshot, &known, revision);
+        self.preview_receipt = Some(Receipt {
+            revision,
+            candidate_ids: snapshot.clone(),
+        });
+        self.previewed_delete_ids = snapshot;
+        self.preview_outcome = Some(outcome.clone());
+        self.status_msg = SharedString::from(outcome.summary_line());
+        Ok(outcome)
+    }
+
+    fn prepare_safe_delete(&mut self) -> Result<String, String> {
+        self.ensure_backup_for_current_candidates()
+    }
+
+    fn apply_preview_outcome(&mut self, snapshot: HashSet<String>, outcome: PreviewOutcome) {
+        let revision = outcome.revision;
+        self.preview_receipt = Some(Receipt {
+            revision,
+            candidate_ids: snapshot.clone(),
+        });
+        self.previewed_delete_ids = snapshot;
+        self.status_msg = SharedString::from(outcome.summary_line());
+        self.preview_outcome = Some(outcome);
+    }
+
+    /// Live X API lookup. `then_confirm` opens the in-app delete panel on success.
+    fn start_live_preview(&mut self, then_confirm: bool, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.cleanup_candidates.iter().cloned().collect();
+        if ids.is_empty() {
+            self.set_error("请先加入安全清理候选");
+            cx.notify();
+            return;
+        }
+        let revision = self.cleanup_revision;
+        let snapshot = self.cleanup_candidates.clone();
+        self.set_busy(format!("正在向 X 预演 {} 条…", ids.len()));
+        cx.notify();
+        let entity = cx.weak_entity();
+        cx.spawn(async move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let settings = Settings::load().map_err(|e| e.to_string())?;
+                    let client = XClient::new(settings).map_err(|e| e.to_string())?;
+                    client.lookup_tweets(&ids).map_err(|e| e.to_string())
+                })
+                .await;
+            entity
+                .update(cx, |state, cx| {
+                    state.loading = false;
+                    match result {
+                        Ok(lookup) => {
+                            if state.cleanup_revision != revision
+                                || state.cleanup_candidates != snapshot
+                            {
+                                state.set_error("候选已变化，请重新预演");
+                            } else {
+                                let outcome = preview_from_lookup(&snapshot, &lookup, revision);
+                                state.error_msg = None;
+                                state.apply_preview_outcome(snapshot, outcome);
+                                if then_confirm {
+                                    state.begin_delete_confirm(cx);
+                                    return;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            // Lookup is a separate X product; network/tier failures
+                            // must not block backup+confirm+delete.
+                            match state.run_local_preview() {
+                                Ok(_) => {
+                                    state.error_msg = None;
+                                    state.status_msg = SharedString::from(format!(
+                                        "X API 预演不可用，已改用本地缓存。原因: {err}（详见 exports/xmanager.log）"
+                                    ));
+                                    if then_confirm {
+                                        state.begin_delete_confirm(cx);
+                                        return;
+                                    }
+                                }
+                                Err(_) => {
+                                    state.set_error(format!(
+                                        "预演失败: {err}（详见 exports/xmanager.log）"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
     }
 
     pub fn cleanup_tweets(&self) -> Vec<Tweet> {
@@ -883,12 +1244,33 @@ impl AppState {
         .detach();
     }
 
+    fn reload_credentials(&mut self) {
+        match Settings::load() {
+            Ok(s) if s.has_oauth1() => {
+                self.credentials_ok = true;
+                self.credentials_msg = SharedString::from("凭证已配置 ✓");
+            }
+            Ok(_) => {
+                self.credentials_ok = false;
+                self.credentials_msg =
+                    SharedString::from("缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）");
+            }
+            Err(e) => {
+                self.credentials_ok = false;
+                self.credentials_msg = SharedString::from(format!("读取配置失败: {e}"));
+            }
+        }
+    }
+
     pub fn fetch_tweets(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
+        self.reload_credentials();
         if !self.credentials_ok {
-            self.set_error("未配置有效凭证，无法拉取推文");
+            self.set_error(
+                "未配置有效凭证，无法拉取推文。填好 .env 后可再点「拉取并分析」或「刷新状态」。",
+            );
             cx.notify();
             return;
         }
@@ -957,8 +1339,9 @@ impl AppState {
         if self.loading {
             return;
         }
+        self.reload_credentials();
         if !self.credentials_ok {
-            self.set_error("未配置有效凭证");
+            self.set_error("未配置有效凭证。请把 .env 放在仓库根目录后再次刷新。");
             cx.notify();
             return;
         }
@@ -1009,10 +1392,6 @@ impl AppState {
         let stamp = Local::now().format("%Y%m%d_%H%M%S");
         let suggested = format!("low_{stamp}.{ext}");
         let n = tweets.len();
-        let source = "筛选结果";
-
-        self.set_busy(format!("准备导出 {n} 条（{source}）…"));
-        cx.notify();
 
         let dir = Settings::default_export_dir();
         let _ = std::fs::create_dir_all(&dir);
@@ -1020,21 +1399,24 @@ impl AppState {
         let entity = cx.weak_entity();
 
         cx.spawn(async move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let chosen = match path_rx.await {
-                Ok(Ok(Some(path))) => Some(path),
-                Ok(Ok(None)) => None,
-                Ok(Err(_)) | Err(_) => None,
-            };
-
-            let path = match chosen {
-                Some(p) => p,
-                None => {
-                    // Fallback: write under exports/
+            let path = match path_rx.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Ok(None)) => {
+                    entity
+                        .update(cx, |state, cx| {
+                            state.loading = false;
+                            state.status_msg = SharedString::from("已取消导出");
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+                Ok(Err(_)) | Err(_) => {
                     let fallback = dir.join(&suggested);
                     entity
                         .update(cx, |state, cx| {
                             state.status_msg =
-                                SharedString::from("未选择路径，使用默认 exports/ 目录");
+                                SharedString::from("未打开存盘框，改写到默认 exports/ 目录");
                             cx.notify();
                         })
                         .ok();
@@ -1104,18 +1486,26 @@ impl AppState {
             ext
         );
         let n = tweets.len();
-        self.set_busy(format!("准备备份 {n} 条候选…"));
-        cx.notify();
         let dir = Settings::default_export_dir();
         let _ = std::fs::create_dir_all(&dir);
+        // Do not set loading before the file dialog: a stuck picker used to
+        // freeze every cleanup action, including 真实删除.
         let path_rx = cx.prompt_for_new_path(&dir, Some(&suggested));
         let entity = cx.weak_entity();
         cx.spawn(async move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let chosen = match path_rx.await {
-                Ok(Ok(Some(path))) => Some(path),
-                _ => None,
+            let path = match path_rx.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Ok(None)) => {
+                    entity
+                        .update(cx, |state, cx| {
+                            state.status_msg = SharedString::from("已取消备份");
+                            cx.notify();
+                        })
+                        .ok();
+                    return;
+                }
+                Ok(Err(_)) | Err(_) => dir.join(&suggested),
             };
-            let path = chosen.unwrap_or_else(|| dir.join(&suggested));
             let result = cx
                 .background_executor()
                 .spawn({
@@ -1170,9 +1560,11 @@ impl AppState {
         self.filter_draft.sort = sort;
         self.filter_draft.order = order;
         self.filter_draft.top_n = top_n;
-        // When ranking rates/high performers, clear max_views so results aren't empty.
+        // When ranking rates/high performers, drop leftover histogram bounds
+        // so the preset is not accidentally empty.
         if !matches!(sort, SortField::Views) || matches!(order, SortOrder::Desc) {
             self.filter_draft.max_views = None;
+            self.filter_draft.min_views = None;
         }
         self.apply_filters(cx);
     }
@@ -1187,26 +1579,59 @@ impl AppState {
         self.apply_filters(cx);
     }
 
-    /// Open the safe dry-run confirmation flow without changing the user's mode toggle.
+    /// Backup if needed, then dry-run against the X API (or local cache if no creds).
     pub fn preview_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.has_valid_backup() {
-            self.set_error("请先为当前候选创建备份");
+        let _ = window;
+        if self.loading {
+            return;
+        }
+        match self.prepare_safe_delete() {
+            Ok(_) => {
+                self.reload_credentials();
+                if self.credentials_ok {
+                    self.start_live_preview(false, cx);
+                } else if let Err(err) = self.run_local_preview() {
+                    self.set_error(err);
+                    cx.notify();
+                } else {
+                    cx.notify();
+                }
+            }
+            Err(err) => {
+                self.set_error(err);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Backup + live preview, then open the in-app confirm panel.
+    pub fn delete_previewed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _ = window;
+        if self.loading {
+            return;
+        }
+        if self.cleanup_candidates.is_empty() {
+            self.set_error("请先加入安全清理候选");
             cx.notify();
             return;
         }
-        self.delete_selected_mode(true, window, cx);
-    }
-
-    /// Real deletion is guarded by an unchanged, successful dry-run preview and
-    /// an in-app second confirmation (count or DELETE).
-    pub fn delete_previewed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Opening the panel does not start deletion; user must pick a token first.
-        let _ = window;
-        self.begin_delete_confirm(cx);
+        self.reload_credentials();
+        if !self.credentials_ok {
+            self.set_error("未配置有效凭证，无法删除");
+            cx.notify();
+            return;
+        }
+        if let Err(err) = self.prepare_safe_delete() {
+            self.set_error(err);
+            cx.notify();
+            return;
+        }
+        self.start_live_preview(true, cx);
     }
 
     /// Commit real deletion after the in-app confirmation token is selected.
     pub fn confirm_and_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _ = window;
         if !self.delete_confirm_is_ready() {
             self.set_error("请先选择「确认数量」或「DELETE」以解锁真实删除");
             cx.notify();
@@ -1225,10 +1650,10 @@ impl AppState {
         }
         // Consume the confirmation so a second click cannot re-enter without re-confirming.
         self.delete_confirm = None;
-        self.delete_selected_mode(false, window, cx);
+        self.execute_real_delete(cx);
     }
 
-    fn delete_selected_mode(&mut self, dry_run: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn execute_real_delete(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
@@ -1243,8 +1668,7 @@ impl AppState {
             cx.notify();
             return;
         }
-
-        if !dry_run && (!self.has_valid_backup() || !self.has_valid_delete_preview()) {
+        if !self.has_valid_backup() || !self.has_valid_delete_preview() {
             self.set_error("真实删除前必须为当前候选完成备份并预演");
             cx.notify();
             return;
@@ -1253,119 +1677,26 @@ impl AppState {
         let n = ids.len();
         let revision = self.cleanup_revision;
         let snapshot: HashSet<String> = ids.iter().cloned().collect();
-        let title = if dry_run {
-            format!("预演删除 {} 条？", n)
-        } else {
-            format!("最终确认：删除 {} 条？", n)
-        };
-        let detail = if dry_run {
-            Some("当前为预演模式：不会真正删除，仅列出将删除的 ID。")
-        } else {
-            Some("删除后无法撤销。你已完成数量/DELETE 二次确认。")
-        };
-
-        // Mark the operation busy before opening the prompt so a second click
-        // cannot enqueue another prompt/delete request.
-        self.set_busy(if dry_run {
-            "等待确认预演…"
-        } else {
-            "等待最终确认真实删除…"
-        });
+        self.set_busy(format!("正在删除 {n} 条…"));
         cx.notify();
-
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &title,
-            detail,
-            &[
-                PromptButton::ok(if dry_run {
-                    "开始预演"
-                } else {
-                    "立即删除"
-                }),
-                PromptButton::cancel("取消"),
-            ],
-            cx,
-        );
 
         let entity = cx.weak_entity();
         cx.spawn(async move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let choice = answer.await.ok();
-            if choice != Some(0) {
-                entity
-                    .update(cx, |state, cx| {
-                        state.loading = false;
-                        state.status_msg = SharedString::from("已取消删除");
-                        cx.notify();
-                    })
-                    .ok();
-                return;
-            }
-
             let valid = entity
                 .update(cx, |state, cx| {
-                    let receipts_valid =
-                        state.has_valid_backup() && (dry_run || state.has_valid_preview());
-                    let snapshot_valid =
-                        state.cleanup_revision == revision && state.cleanup_candidates == snapshot;
-                    let valid = receipts_valid && snapshot_valid;
+                    let valid = state.has_valid_backup()
+                        && state.has_valid_preview()
+                        && state.cleanup_revision == revision
+                        && state.cleanup_candidates == snapshot;
                     if !valid {
                         state.loading = false;
-                        state.set_error(if dry_run {
-                            "候选版本或备份已变化，请重新创建备份后再预演"
-                        } else {
-                            "候选版本、备份或预演已变化，请重新执行安全清理步骤"
-                        });
+                        state.set_error("候选版本、备份或预演已变化，请重新执行安全清理步骤");
                         cx.notify();
                     }
                     valid
                 })
                 .unwrap_or(false);
             if !valid {
-                return;
-            }
-
-            entity
-                .update(cx, |state, cx| {
-                    state.status_msg = SharedString::from(if dry_run {
-                        format!("预演删除 {n} 条…")
-                    } else {
-                        format!("正在删除 {n} 条…")
-                    });
-                    cx.notify();
-                })
-                .ok();
-
-            if dry_run {
-                entity
-                    .update(cx, |state, cx| {
-                        state.loading = false;
-                        state.error_msg = None;
-                        if state.cleanup_revision == revision
-                            && state.cleanup_candidates == snapshot
-                        {
-                            let known: HashSet<String> = state
-                                .all_tweets
-                                .iter()
-                                .map(|t| t.id.clone())
-                                .chain(state.cleanup_snapshot.keys().cloned())
-                                .collect();
-                            let outcome = classify_preview(&snapshot, &known, revision);
-                            state.preview_receipt = Some(Receipt {
-                                revision,
-                                candidate_ids: snapshot.clone(),
-                            });
-                            state.previewed_delete_ids = snapshot.clone();
-                            state.status_msg = SharedString::from(outcome.summary_line());
-                            state.preview_outcome = Some(outcome);
-                        } else {
-                            state.status_msg = SharedString::from(
-                                "预演完成，但候选版本已变化，结果未写入",
-                            );
-                        }
-                        cx.notify();
-                    })
-                    .ok();
                 return;
             }
 
@@ -1386,8 +1717,6 @@ impl AppState {
                         Ok((requested_ids, (ok, fail))) => {
                             let outcome = DeleteOutcome::from_request(&requested_ids, &fail);
                             if ok > 0 {
-                                // Reconcile against the immutable request, never a selection
-                                // that may have changed while the API call was in flight.
                                 let deleted: HashSet<String> =
                                     outcome.succeeded.iter().cloned().collect();
                                 for id in &deleted {
@@ -1414,7 +1743,9 @@ impl AppState {
                                     Some(SharedString::from(format!("部分失败: {sample}")));
                             }
                         }
-                        Err(e) => state.set_error(format!("删除失败: {e}")),
+                        Err(e) => state.set_error(format!(
+                            "删除失败: {e}（详见 exports/xmanager.log）"
+                        )),
                     }
                     cx.notify();
                 })
@@ -1427,13 +1758,16 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        applied_filter_chips, chip_label, classify_preview, delete_confirm_ready, receipt_matches,
-        refresh_candidate_snapshot, resolve_focused_tweet, AppliedFilterChip, DeleteConfirm,
-        DeleteConfirmToken, DeleteOutcome, LayoutMode, Receipt,
+        applied_filter_chips, chip_label, classify_preview, cleanup_next_hint,
+        clamp_inspector_width, delete_confirm_ready, ids_for_cleanup_staging, preview_from_lookup,
+        receipt_matches, refresh_candidate_snapshot, resolve_focused_tweet, AppliedFilterChip,
+        DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft, INSPECTOR_WIDTH_MAX,
+        INSPECTOR_WIDTH_MIN, LayoutMode, Receipt,
     };
     use std::collections::{HashMap, HashSet};
     use xmanager_core::{
         FilterOptions, KindFilter, PublicMetrics, SortField, SortOrder, TimeRange, Tweet,
+        TweetLookup,
     };
 
     #[test]
@@ -1490,30 +1824,103 @@ mod tests {
     }
 
     #[test]
+    fn staging_ids_fall_back_to_focused_tweet() {
+        let empty = HashSet::new();
+        assert!(ids_for_cleanup_staging(&empty, None).is_empty());
+        assert_eq!(
+            ids_for_cleanup_staging(&empty, Some("42")),
+            vec!["42".to_string()]
+        );
+        let selected = HashSet::from(["a".to_owned(), "b".to_owned()]);
+        let mut ids = ids_for_cleanup_staging(&selected, Some("42"));
+        ids.sort();
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn cleanup_hint_unlocks_delete_after_staging() {
+        let empty = cleanup_next_hint(0, true, false, false, None);
+        assert!(empty.contains("勾选"));
+        let staged = cleanup_next_hint(2, true, false, false, None);
+        assert!(staged.contains("真实删除"));
+        let confirm = DeleteConfirm {
+            expected_count: 2,
+            selected: None,
+            typed: String::new(),
+        };
+        let waiting = cleanup_next_hint(2, true, true, true, Some(&confirm));
+        assert!(waiting.contains("确认数量") || waiting.contains("DELETE"));
+        let ready = DeleteConfirm {
+            expected_count: 2,
+            selected: Some(DeleteConfirmToken::DeleteWord),
+            typed: String::new(),
+        };
+        let unlocked = cleanup_next_hint(2, true, true, true, Some(&ready));
+        assert!(unlocked.contains("确认并删除"));
+    }
+
+    #[test]
     fn delete_confirm_requires_count_or_delete_word() {
         let empty = DeleteConfirm {
             expected_count: 0,
             selected: Some(DeleteConfirmToken::DeleteWord),
+            typed: String::new(),
         };
         assert!(!delete_confirm_ready(&empty));
 
         let unselected = DeleteConfirm {
             expected_count: 3,
             selected: None,
+            typed: String::new(),
         };
         assert!(!delete_confirm_ready(&unselected));
 
         let by_count = DeleteConfirm {
             expected_count: 3,
             selected: Some(DeleteConfirmToken::Count),
+            typed: String::new(),
         };
         assert!(delete_confirm_ready(&by_count));
 
         let by_word = DeleteConfirm {
             expected_count: 3,
             selected: Some(DeleteConfirmToken::DeleteWord),
+            typed: String::new(),
         };
         assert!(delete_confirm_ready(&by_word));
+
+        let typed_word = DeleteConfirm {
+            expected_count: 3,
+            selected: None,
+            typed: "delete".into(),
+        };
+        assert!(delete_confirm_ready(&typed_word));
+
+        let typed_count = DeleteConfirm {
+            expected_count: 3,
+            selected: None,
+            typed: "3".into(),
+        };
+        assert!(delete_confirm_ready(&typed_count));
+
+        let typed_wrong = DeleteConfirm {
+            expected_count: 3,
+            selected: None,
+            typed: "2".into(),
+        };
+        assert!(!delete_confirm_ready(&typed_wrong));
+    }
+
+    #[test]
+    fn unrestricted_draft_drops_the_low_view_preset() {
+        let preset = FilterDraft::default();
+        assert_eq!(preset.max_views, Some(50));
+        let open = FilterDraft::unrestricted();
+        assert_eq!(open.max_views, None);
+        assert!(open.kinds.reply);
+        assert!(open.kinds.retweet);
+        assert!(open.time_range == TimeRange::All);
+        assert!(open.top_n.is_none());
     }
 
     #[test]
@@ -1521,8 +1928,8 @@ mod tests {
         let filter = FilterOptions {
             max_views: Some(50),
             min_views: Some(1),
-            max_engagement: None,
-            older_than_days: None,
+            max_engagement: Some(10),
+            older_than_days: Some(90),
             newer_than_days: None,
             time_range: TimeRange::Days7,
             kinds: KindFilter {
@@ -1541,12 +1948,16 @@ mod tests {
         assert!(labels.iter().any(|l| l.contains("7 天")));
         assert!(labels.iter().any(|l| l == "曝光 ≤ 50"));
         assert!(labels.iter().any(|l| l == "曝光 ≥ 1"));
+        assert!(labels.iter().any(|l| l == "互动 ≤ 10"));
+        assert!(labels.iter().any(|l| l == "早于 90 天"));
         assert!(labels.iter().any(|l| l == "Top 20"));
         assert!(labels.iter().any(|l| l.contains("点赞率")));
         assert!(labels.iter().any(|l| l == "最高优先"));
         assert!(labels.iter().any(|l| l.contains("原创")));
         assert!(matches!(
-            chips.iter().find(|c| matches!(c, AppliedFilterChip::MaxViews(_))),
+            chips
+                .iter()
+                .find(|c| matches!(c, AppliedFilterChip::MaxViews(_))),
             Some(AppliedFilterChip::MaxViews(50))
         ));
     }
@@ -1564,6 +1975,30 @@ mod tests {
     }
 
     #[test]
+    fn preview_from_lookup_splits_found_missing_and_failed() {
+        let candidates = HashSet::from(["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+        let lookup = TweetLookup {
+            found: vec![Tweet {
+                id: "a".into(),
+                text: "keep".into(),
+                created_at: None,
+                public_metrics: PublicMetrics::default(),
+                conversation_id: None,
+                in_reply_to_user_id: None,
+                is_retweet: false,
+                is_quote: false,
+            }],
+            missing: vec!["b".into()],
+            failed: vec![("c".into(), "forbidden".into())],
+        };
+        let outcome = preview_from_lookup(&candidates, &lookup, 3);
+        assert_eq!(outcome.deletable, vec!["a".to_string()]);
+        assert_eq!(outcome.missing, vec!["b".to_string()]);
+        assert_eq!(outcome.failed, vec![("c".to_string(), "forbidden".into())]);
+        assert_eq!(outcome.total, 3);
+    }
+
+    #[test]
     fn classify_preview_splits_known_and_missing() {
         let candidates = HashSet::from(["a".to_owned(), "b".to_owned(), "c".to_owned()]);
         let known = HashSet::from(["a".to_owned(), "c".to_owned()]);
@@ -1574,6 +2009,13 @@ mod tests {
         assert_eq!(outcome.missing, vec!["b".to_owned()]);
         assert!(outcome.failed.is_empty());
         assert!(outcome.summary_line().contains("可删 2"));
+    }
+
+    #[test]
+    fn inspector_width_clamps_to_usable_range() {
+        assert_eq!(clamp_inspector_width(100.0), INSPECTOR_WIDTH_MIN);
+        assert_eq!(clamp_inspector_width(900.0), INSPECTOR_WIDTH_MAX);
+        assert_eq!(clamp_inspector_width(380.0), 380.0);
     }
 
     #[test]
@@ -1588,10 +2030,21 @@ mod tests {
         assert!(!LayoutMode::Narrow.show_inspector());
         assert!(LayoutMode::Wide.show_nav_labels());
         assert!(!LayoutMode::Medium.show_nav_labels());
-        // Narrow keeps a usable overlay width and only opens when focused.
         assert!(LayoutMode::Narrow.inspector_width() > 0.0);
-        assert!(!LayoutMode::Narrow.library_shows_inspector(false));
-        assert!(LayoutMode::Narrow.library_shows_inspector(true));
         assert!(LayoutMode::Wide.library_shows_inspector(false));
+        assert!(!LayoutMode::Medium.library_shows_inspector(false));
+        assert!(!LayoutMode::Medium.library_shows_inspector(true));
+        assert!(!LayoutMode::Narrow.library_shows_inspector(false));
+        assert!(!LayoutMode::Narrow.library_shows_inspector(true));
+        assert!(!LayoutMode::Wide.filter_as_overlay());
+        assert!(!LayoutMode::Wide.inspector_as_overlay());
+        assert!(!LayoutMode::Medium.filter_as_overlay());
+        assert!(LayoutMode::Medium.inspector_as_overlay());
+        assert!(!LayoutMode::Medium.tweet_list_as_cards());
+        assert!(!LayoutMode::Medium.stack_cleanup_steps());
+        assert!(LayoutMode::Narrow.filter_as_overlay());
+        assert!(LayoutMode::Narrow.inspector_as_overlay());
+        assert!(LayoutMode::Narrow.tweet_list_as_cards());
+        assert!(LayoutMode::Narrow.stack_cleanup_steps());
     }
 }

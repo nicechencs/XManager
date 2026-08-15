@@ -8,13 +8,23 @@ use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
 use reqwest::StatusCode;
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::thread;
+use std::collections::{BTreeMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const BASE_URL: &str = "https://api.x.com/2";
+const BASE_URL_FALLBACK: &str = "https://api.twitter.com/2";
 const TWEET_FIELDS: &str =
     "created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets";
+
+/// Live tweet lookup result (`GET /2/tweets?ids=`).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TweetLookup {
+    pub found: Vec<Tweet>,
+    pub missing: Vec<String>,
+    pub failed: Vec<(String, String)>,
+}
 
 /// Authenticated client for X API v2 (blocking; safe to call from a background thread).
 pub struct XClient {
@@ -27,6 +37,7 @@ impl XClient {
         settings.require_oauth1()?;
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(8))
             .build()
             .map_err(|e| Error::Network(e.to_string()))?;
         Ok(Self { http, settings })
@@ -37,7 +48,7 @@ impl XClient {
         let url = format!("{BASE_URL}/users/me");
         let mut params = BTreeMap::new();
         params.insert("user.fields".into(), "id,username,name".into());
-        let data = self.request_json("GET", &url, &params, true)?;
+        let data = self.request_json("GET", &url, &params)?;
         let user = data
             .get("data")
             .ok_or_else(|| Error::Parse("missing data in /users/me".into()))?;
@@ -82,7 +93,7 @@ impl XClient {
             }
 
             let url = format!("{BASE_URL}/users/{user_id}/tweets");
-            let data = self.request_json("GET", &url, &params, true)?;
+            let data = self.request_json("GET", &url, &params)?;
 
             let items = data
                 .get("data")
@@ -128,35 +139,78 @@ impl XClient {
         Ok((me, tweets))
     }
 
-    /// Delete a tweet by id. Returns true on success.
+    /// Delete a tweet by id. Returns true only when `data.deleted` is true.
     pub fn delete_tweet(&self, tweet_id: &str) -> Result<bool> {
         let url = format!("{BASE_URL}/tweets/{tweet_id}");
         let params = BTreeMap::new();
-        let data = self.request_json("DELETE", &url, &params, true)?;
-        // { "data": { "deleted": true } }
-        if let Some(deleted) = data
-            .get("data")
-            .and_then(|d| d.get("deleted"))
-            .and_then(|v| v.as_bool())
-        {
-            return Ok(deleted);
+        let data = self.request_json("DELETE", &url, &params)?;
+        match deleted_flag(&data) {
+            Ok(flag) => Ok(flag),
+            Err(err) => {
+                api_log(&format!(
+                    "DELETE {tweet_id} parse fail: {err}; body={}",
+                    data
+                ));
+                Err(err)
+            }
         }
-        // empty / missing → treat as success if we got here without error
-        Ok(true)
     }
 
     /// Delete many tweets; returns (success_count, failures with id+error).
+    ///
+    /// Stops immediately on `Error::RateLimited` and marks remaining ids as skipped.
     pub fn delete_tweets(&self, ids: &[String]) -> (usize, Vec<(String, String)>) {
         let mut ok = 0usize;
         let mut fail = Vec::new();
-        for id in ids {
+        for (idx, id) in ids.iter().enumerate() {
             match self.delete_tweet(id) {
                 Ok(true) => ok += 1,
                 Ok(false) => fail.push((id.clone(), "API returned deleted=false".into())),
-                Err(e) => fail.push((id.clone(), e.to_string())),
+                Err(e) => {
+                    let rate_limited = matches!(e, Error::RateLimited { .. });
+                    fail.push((id.clone(), e.to_string()));
+                    if rate_limited {
+                        for skipped in &ids[idx + 1..] {
+                            fail.push((skipped.clone(), "skipped: rate limited".into()));
+                        }
+                        break;
+                    }
+                }
             }
         }
         (ok, fail)
+    }
+
+    /// Look up tweets by id (`GET /2/tweets?ids=`), in batches of 100.
+    ///
+    /// Empty `ids` returns an empty result. A rate-limited batch returns
+    /// `Error::RateLimited` so the caller can surface a banner.
+    pub fn lookup_tweets(&self, ids: &[String]) -> Result<TweetLookup> {
+        if ids.is_empty() {
+            return Ok(TweetLookup::default());
+        }
+
+        let mut found = Vec::new();
+        let mut missing = Vec::new();
+        let mut failed = Vec::new();
+
+        for chunk in ids.chunks(100) {
+            let mut params = BTreeMap::new();
+            params.insert("ids".into(), chunk.join(","));
+            params.insert("tweet.fields".into(), TWEET_FIELDS.into());
+            let url = format!("{BASE_URL}/tweets");
+            let data = self.request_json_partial("GET", &url, &params)?;
+            let classified = classify_lookup(chunk, &data);
+            found.extend(classified.found);
+            missing.extend(classified.missing);
+            failed.extend(classified.failed);
+        }
+
+        Ok(TweetLookup {
+            found,
+            missing,
+            failed,
+        })
     }
 
     fn request_json(
@@ -164,14 +218,31 @@ impl XClient {
         method: &str,
         url: &str,
         params: &BTreeMap<String, String>,
-        allow_retry: bool,
+    ) -> Result<Value> {
+        self.request_json_inner(method, url, params, false)
+    }
+
+    fn request_json_partial(
+        &self,
+        method: &str,
+        url: &str,
+        params: &BTreeMap<String, String>,
+    ) -> Result<Value> {
+        self.request_json_inner(method, url, params, true)
+    }
+
+    fn request_json_inner(
+        &self,
+        method: &str,
+        url: &str,
+        params: &BTreeMap<String, String>,
+        allow_partial_errors: bool,
     ) -> Result<Value> {
         let response = self.send(method, url, params)?;
 
-        if response.status() == StatusCode::TOO_MANY_REQUESTS && allow_retry {
-            let sleep_secs = rate_limit_sleep_secs(&response);
-            thread::sleep(Duration::from_secs(sleep_secs));
-            return self.request_json(method, url, params, false);
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            let retry_after_secs = rate_limit_sleep_secs(&response);
+            return Err(Error::RateLimited { retry_after_secs });
         }
 
         let status = response.status();
@@ -196,13 +267,54 @@ impl XClient {
 
         if !status.is_success() {
             let msg = format_api_error(&data, status.as_u16());
+            api_log(&format!(
+                "HTTP {} body={}",
+                status.as_u16(),
+                truncate(&body, 400)
+            ));
             return Err(Error::api(status.as_u16(), msg));
+        }
+
+        if !allow_partial_errors && has_errors_without_usable_data(&data) {
+            return Err(Error::api(
+                status.as_u16(),
+                format_api_error(&data, status.as_u16()),
+            ));
         }
 
         Ok(data)
     }
 
     fn send(
+        &self,
+        method: &str,
+        url: &str,
+        params: &BTreeMap<String, String>,
+    ) -> Result<Response> {
+        let mut last_network = None;
+        for candidate in candidate_urls(url) {
+            match self.send_once(method, &candidate, params) {
+                Ok(response) => {
+                    api_log(&format!(
+                        "{method} {candidate} -> HTTP {}",
+                        response.status().as_u16()
+                    ));
+                    return Ok(response);
+                }
+                Err(err) if matches!(err, Error::Network(_)) => {
+                    api_log(&format!("{method} {candidate} -> {err}"));
+                    last_network = Some(err);
+                }
+                Err(err) => {
+                    api_log(&format!("{method} {candidate} -> {err}"));
+                    return Err(err);
+                }
+            }
+        }
+        Err(last_network.unwrap_or_else(|| Error::Network("no API host remaining".into())))
+    }
+
+    fn send_once(
         &self,
         method: &str,
         url: &str,
@@ -233,12 +345,34 @@ impl XClient {
         };
         req = req.headers(headers);
         if !params.is_empty() {
-            // query string for GET/DELETE
             req = req.query(&params.iter().collect::<Vec<_>>());
         }
 
         req.send().map_err(|e| Error::Network(e.to_string()))
     }
+}
+
+fn candidate_urls(url: &str) -> Vec<String> {
+    let alt = if url.starts_with(BASE_URL) {
+        url.replacen(BASE_URL, BASE_URL_FALLBACK, 1)
+    } else if url.starts_with(BASE_URL_FALLBACK) {
+        url.replacen(BASE_URL_FALLBACK, BASE_URL, 1)
+    } else {
+        return vec![url.to_string()];
+    };
+    vec![url.to_string(), alt]
+}
+
+fn api_log(message: &str) {
+    let path = Settings::log_path();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let _ = writeln!(file, "{ts} {message}");
 }
 
 fn sign_oauth1(
@@ -314,7 +448,7 @@ fn format_api_error(data: &Value, status: u16) -> String {
 
     let mut parts = vec![format!("HTTP {status}")];
     if status == 429 {
-        parts.push("触发速率限制，请稍后重试（客户端会在可解析 reset 时自动等待）".into());
+        parts.push("触发速率限制，请稍后重试".into());
     }
     if let Some(t) = title {
         parts.push(t.to_string());
@@ -372,6 +506,123 @@ fn parse_referenced_flags(item: &Value) -> (bool, bool) {
         }
     }
     (is_retweet, is_quote)
+}
+
+/// Require `data.deleted` to be a boolean. Missing / null / empty is an error.
+fn deleted_flag(data: &Value) -> Result<bool> {
+    data.get("data")
+        .and_then(|d| d.get("deleted"))
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| {
+            Error::Parse("delete response missing data.deleted (empty or malformed body)".into())
+        })
+}
+
+fn has_usable_data(data: &Value) -> bool {
+    match data.get("data") {
+        None | Some(Value::Null) => false,
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(_) => true,
+    }
+}
+
+fn has_errors_without_usable_data(data: &Value) -> bool {
+    let has_errors = data
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    has_errors && !has_usable_data(data)
+}
+
+fn classify_lookup(requested: &[String], body: &Value) -> TweetLookup {
+    let mut found = Vec::new();
+    let mut missing = Vec::new();
+    let mut failed = Vec::new();
+    let mut accounted = HashSet::new();
+
+    if let Some(items) = body.get("data").and_then(|v| v.as_array()) {
+        for item in items {
+            match parse_tweet(item) {
+                Ok(tweet) => {
+                    accounted.insert(tweet.id.clone());
+                    found.push(tweet);
+                }
+                Err(e) => {
+                    if let Ok(id) = json_str(item, "id") {
+                        accounted.insert(id.clone());
+                        failed.push((id, e.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(errors) = body.get("errors").and_then(|v| v.as_array()) {
+        for err in errors {
+            let Some(id) = lookup_error_id(err) else {
+                continue;
+            };
+            if !accounted.insert(id.clone()) {
+                continue;
+            }
+            if is_not_found_error(err) {
+                missing.push(id);
+            } else {
+                failed.push((id, lookup_error_message(err)));
+            }
+        }
+    }
+
+    for id in requested {
+        if !accounted.contains(id) {
+            failed.push((id.clone(), "not returned by tweet lookup".into()));
+        }
+    }
+
+    TweetLookup {
+        found,
+        missing,
+        failed,
+    }
+}
+
+fn lookup_error_id(err: &Value) -> Option<String> {
+    err.get("resource_id")
+        .or_else(|| err.get("value"))
+        .and_then(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        })
+}
+
+fn is_not_found_error(err: &Value) -> bool {
+    let ty = err.get("type").and_then(Value::as_str).unwrap_or("");
+    let title = err.get("title").and_then(Value::as_str).unwrap_or("");
+    let detail = err
+        .get("detail")
+        .or_else(|| err.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let ty_l = ty.to_ascii_lowercase();
+    let title_l = title.to_ascii_lowercase();
+    let detail_l = detail.to_ascii_lowercase();
+    ty_l.contains("resource-not-found")
+        || ty_l.contains("not-found")
+        || title_l.contains("not found")
+        || detail_l.contains("could not find")
+        || err.get("status").and_then(Value::as_u64) == Some(404)
+}
+
+fn lookup_error_message(err: &Value) -> String {
+    err.get("detail")
+        .or_else(|| err.get("message"))
+        .or_else(|| err.get("title"))
+        .and_then(Value::as_str)
+        .unwrap_or("tweet lookup error")
+        .to_string()
 }
 
 fn json_str(value: &Value, key: &str) -> Result<String> {
@@ -454,6 +705,124 @@ mod tests {
         assert!(msg.contains("HTTP 429"));
         assert!(msg.contains("速率限制"));
         assert!(msg.contains("Too Many Requests"));
+    }
+
+    #[test]
+    fn candidate_urls_try_x_then_twitter() {
+        let urls = candidate_urls("https://api.x.com/2/users/me");
+        assert_eq!(
+            urls,
+            vec![
+                "https://api.x.com/2/users/me".to_string(),
+                "https://api.twitter.com/2/users/me".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn lookup_tweets_empty_ids_is_empty() {
+        let client = XClient::new(Settings {
+            api_key: "k".into(),
+            api_secret: "s".into(),
+            access_token: "t".into(),
+            access_token_secret: "ts".into(),
+            bearer_token: String::new(),
+        })
+        .expect("dummy client");
+        let lookup = client.lookup_tweets(&[]).expect("empty lookup");
+        assert!(lookup.found.is_empty());
+        assert!(lookup.missing.is_empty());
+        assert!(lookup.failed.is_empty());
+    }
+
+    #[test]
+    fn rate_limited_display_contains_retry_seconds() {
+        let err = Error::RateLimited {
+            retry_after_secs: 42,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("42"), "{msg}");
+        assert!(
+            msg.to_ascii_lowercase().contains("rate limited") || msg.contains("限流"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn deleted_flag_missing_is_not_success() {
+        assert!(deleted_flag(&Value::Null).is_err());
+        assert!(deleted_flag(&json!({})).is_err());
+        assert!(deleted_flag(&json!({ "data": {} })).is_err());
+        assert!(deleted_flag(&json!({ "data": { "deleted": null } })).is_err());
+        assert_ne!(deleted_flag(&Value::Null).ok(), Some(true));
+        assert_eq!(
+            deleted_flag(&json!({ "data": { "deleted": true } })).unwrap(),
+            true
+        );
+        assert_eq!(
+            deleted_flag(&json!({ "data": { "deleted": false } })).unwrap(),
+            false
+        );
+    }
+
+    #[test]
+    fn classify_lookup_splits_found_missing_failed() {
+        let body = json!({
+            "data": [
+                {
+                    "id": "1",
+                    "text": "hello",
+                    "public_metrics": { "like_count": 1 }
+                }
+            ],
+            "errors": [
+                {
+                    "resource_id": "2",
+                    "value": "2",
+                    "title": "Not Found Error",
+                    "detail": "Could not find tweet with id: [2].",
+                    "type": "https://api.twitter.com/2/problems/resource-not-found"
+                },
+                {
+                    "resource_id": "3",
+                    "title": "Authorization Error",
+                    "detail": "not authorized to view this tweet",
+                    "type": "https://api.twitter.com/2/problems/not-authorized-for-resource"
+                }
+            ]
+        });
+        let ids = vec![
+            "1".to_string(),
+            "2".to_string(),
+            "3".to_string(),
+            "4".to_string(),
+        ];
+        let lookup = classify_lookup(&ids, &body);
+        assert_eq!(lookup.found.len(), 1);
+        assert_eq!(lookup.found[0].id, "1");
+        assert_eq!(lookup.missing, vec!["2".to_string()]);
+        assert_eq!(lookup.failed.len(), 2);
+        assert_eq!(lookup.failed[0].0, "3");
+        assert!(lookup.failed[0].1.contains("not authorized"));
+        assert_eq!(lookup.failed[1].0, "4");
+    }
+
+    #[test]
+    fn errors_without_usable_data_is_detected() {
+        assert!(has_errors_without_usable_data(&json!({
+            "errors": [{ "detail": "boom" }]
+        })));
+        assert!(has_errors_without_usable_data(&json!({
+            "data": [],
+            "errors": [{ "detail": "boom" }]
+        })));
+        assert!(!has_errors_without_usable_data(&json!({
+            "data": [{ "id": "1" }],
+            "errors": [{ "detail": "partial" }]
+        })));
+        assert!(!has_errors_without_usable_data(&json!({
+            "data": []
+        })));
     }
 }
 

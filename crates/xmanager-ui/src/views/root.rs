@@ -1,12 +1,15 @@
 //! Application shell and the three product routes.
 
 use crate::app::{
-    resolve_focused_tweet, AppState, DeleteConfirmToken, ExportFormat, Route,
+    cleanup_next_hint, resolve_focused_tweet, AppState, DeleteConfirmToken, ExportFormat, Route,
 };
 use crate::theme;
-use crate::views::{stats_panel, status_bar, toolbar, tweet_list};
+use crate::views::{status_bar, toolbar, tweet_list};
 use crate::widgets::{btn, danger_btn, section_label, stat_card, stepper, toggle_chip};
-use gpui::{div, prelude::*, px, Context, Div, Stateful};
+use gpui::{
+    div, prelude::*, px, Context, CursorStyle, Div, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Stateful,
+};
 use xmanager_core::{KindFilter, SortField, SortOrder, TimeRange, Tweet};
 
 fn clamp_opt(value: Option<u64>, delta: i64, min: u64, max: u64) -> Option<u64> {
@@ -35,20 +38,44 @@ fn kind_chip(
 
 fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
     let d = &state.filter_draft;
+    let overlay = state.layout_mode.filter_as_overlay();
     div()
         .id("filter-drawer")
         .flex()
         .flex_col()
-        .w(px(300.))
-        .flex_none()
+        .when(overlay, |el| {
+            el.flex_1().w_full().min_w(px(0.)).min_h(px(0.))
+        })
+        .when(!overlay, |el| el.w(px(300.)).flex_none())
         .h_full()
         .gap_2()
         .p_3()
         .overflow_y_scroll()
         .bg(theme::c(theme::BG_PANEL))
-        .border_r_1()
-        .border_color(theme::c(theme::BORDER))
-        .child(section_label("筛选与排序"))
+        .when(!overlay, |el| {
+            el.border_r_1().border_color(theme::c(theme::BORDER))
+        })
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(section_label("筛选与排序"))
+                .when(overlay, |el| {
+                    el.child(btn(
+                        "filter-drawer-close",
+                        "关闭",
+                        false,
+                        true,
+                        cx.listener(|this, _, _window, cx| {
+                            this.filter_drawer_open = false;
+                            cx.notify();
+                        }),
+                    ))
+                }),
+        )
         .child(section_label("拉取数量"))
         .child(div().flex().flex_row().flex_wrap().gap_1().children(
             [50usize, 100, 200, 500, 1000].into_iter().map(|n| {
@@ -163,6 +190,46 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 },
             )
         })
+        .child(section_label("互动上限"))
+        .child({
+            let entity = cx.weak_entity();
+            stepper(
+                "filter-max-engagement",
+                d.max_engagement.unwrap_or(0),
+                5,
+                0,
+                1_000_000,
+                move |delta, _, app| {
+                    entity
+                        .update(app, |this, cx| {
+                            this.filter_draft.max_engagement =
+                                clamp_opt(this.filter_draft.max_engagement, delta, 0, 1_000_000);
+                            cx.notify();
+                        })
+                        .ok();
+                },
+            )
+        })
+        .child(section_label("早于天数"))
+        .child({
+            let entity = cx.weak_entity();
+            stepper(
+                "filter-older-than-days",
+                d.older_than_days.unwrap_or(0),
+                1,
+                0,
+                3600,
+                move |delta, _, app| {
+                    entity
+                        .update(app, |this, cx| {
+                            this.filter_draft.older_than_days =
+                                clamp_opt(this.filter_draft.older_than_days, delta, 0, 3600);
+                            cx.notify();
+                        })
+                        .ok();
+                },
+            )
+        })
         .child(section_label("排序指标"))
         .child(
             div().flex().flex_row().flex_wrap().gap_1().children(
@@ -191,25 +258,23 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
             ),
         )
         .child(section_label("低曝光快捷"))
-        .child(
-            div().flex().flex_row().flex_wrap().gap_1().children(
-                [10u64, 20, 50, 100].into_iter().map(|threshold| {
-                    toggle_chip(
-                        format!("low-views-{threshold}"),
-                        format!("≤{threshold}"),
-                        d.max_views == Some(threshold)
-                            && d.min_views.is_none()
-                            && d.sort == SortField::Views
-                            && d.order == SortOrder::Asc
-                            && d.top_n.is_none(),
-                        cx.listener(move |this, _, _window, cx| {
-                            this.apply_low_exposure_preset(threshold, cx);
-                            this.filter_drawer_open = false;
-                        }),
-                    )
-                }),
-            ),
-        )
+        .child(div().flex().flex_row().flex_wrap().gap_1().children(
+            [10u64, 20, 50, 100].into_iter().map(|threshold| {
+                toggle_chip(
+                    format!("low-views-{threshold}"),
+                    format!("≤{threshold}"),
+                    d.max_views == Some(threshold)
+                        && d.min_views.is_none()
+                        && d.sort == SortField::Views
+                        && d.order == SortOrder::Asc
+                        && d.top_n.is_none(),
+                    cx.listener(move |this, _, _window, cx| {
+                        this.apply_low_exposure_preset(threshold, cx);
+                        this.filter_drawer_open = false;
+                    }),
+                )
+            }),
+        ))
         .child(
             div()
                 .flex()
@@ -272,7 +337,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
             false,
             !state.loading,
             cx.listener(|this, _, _window, cx| {
-                this.filter_draft = crate::app::FilterDraft::default();
+                this.filter_draft = crate::app::FilterDraft::unrestricted();
                 this.apply_filters(cx);
                 this.filter_drawer_open = false;
                 cx.notify();
@@ -302,8 +367,8 @@ fn context_metric(label: impl Into<String>, value: impl Into<String>) -> Div {
         )
 }
 
-fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let width = state.layout_mode.inspector_width();
+fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
+    let overlay = state.layout_mode.inspector_as_overlay();
     let focused = state
         .focused_tweet_id
         .as_ref()
@@ -380,18 +445,24 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 }),
             ))
     });
-    let narrow_overlay = !state.layout_mode.show_inspector();
     div()
+        .id("tweet-inspector")
         .flex()
         .flex_col()
-        .w(px(width))
-        .flex_none()
+        .when(overlay, |el| {
+            el.flex_1().w_full().min_w(px(0.)).min_h(px(0.))
+        })
+        .when(!overlay, |el| {
+            el.w(px(state.effective_inspector_width())).flex_none()
+        })
         .h_full()
         .gap_3()
         .p_4()
+        .overflow_y_scroll()
         .bg(theme::c(theme::BG_PANEL))
-        .border_l_1()
-        .border_color(theme::c(theme::BORDER))
+        .when(!overlay, |el| {
+            el.border_l_1().border_color(theme::c(theme::BORDER))
+        })
         .child(
             div()
                 .flex()
@@ -404,16 +475,12 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         .text_sm()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child(if focused.is_some() {
-                            if narrow_overlay {
-                                "推文检查（窄屏）"
-                            } else {
-                                "推文检查"
-                            }
+                            "推文检查"
                         } else {
                             "检查器"
                         }),
                 )
-                .when(narrow_overlay && focused.is_some(), |el| {
+                .when(overlay, |el| {
                     el.child(btn(
                         "inspector-close",
                         "关闭",
@@ -488,12 +555,27 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 }
             })
             .unwrap_or_else(|| base.into());
-        toggle_chip(
+        let chip = toggle_chip(
             id,
             label,
             active,
             cx.listener(move |this, _, _window, cx| this.set_route(route, cx)),
-        )
+        );
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .w_full()
+            .gap_1()
+            .child(chip)
+            .when(!show_labels, |el| {
+                el.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme::c(theme::TEXT_MUTED))
+                        .child(full),
+                )
+            })
     };
     div()
         .flex()
@@ -627,11 +709,54 @@ fn loading_banner(state: &AppState) -> Option<Div> {
     )
 }
 
-fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let show_inspector = state
-        .layout_mode
-        .library_shows_inspector(state.focused_tweet_id.is_some());
-    let mut content = div().flex().flex_row().flex_1().min_h(px(0.)).min_w(px(0.));
+fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
+    let layout = state.layout_mode;
+    let focused = state.focused_tweet_id.is_some();
+    let inspector_overlay = layout.inspector_as_overlay() && focused;
+    // Narrow: replace the list with a full-height overlay instead of sibling columns.
+    if layout.filter_as_overlay() && state.filter_drawer_open {
+        return div()
+            .id("library-filter-overlay")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .min_w(px(0.))
+            .child(filter_drawer(state, cx));
+    }
+    // Medium/Narrow: focused inspector replaces the list (never also a side column).
+    if inspector_overlay {
+        return div()
+            .id("library-inspector-overlay")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .min_w(px(0.))
+            .child(inspector(state, cx));
+    }
+
+    let show_split = !inspector_overlay && layout.library_shows_inspector(focused);
+    let mut content = div()
+        .id("library-split-row")
+        .flex()
+        .flex_row()
+        .flex_1()
+        .min_h(px(0.))
+        .min_w(px(0.))
+        .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+            if this.split_drag.is_some() {
+                this.update_split_drag(f32::from(event.position.x), cx);
+            }
+        }))
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseUpEvent, _window, cx| this.end_split_drag(cx)),
+        )
+        .on_mouse_up_out(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseUpEvent, _window, cx| this.end_split_drag(cx)),
+        );
     if state.filter_drawer_open {
         content = content.child(filter_drawer(state, cx));
     }
@@ -640,175 +765,44 @@ fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Div {
             .flex()
             .flex_col()
             .flex_1()
-            .min_w(px(0.))
+            .min_w(px(280.))
             .min_h(px(0.))
             .child(toolbar::render_toolbar(state, cx))
             .children(loading_banner(state))
             .child(tweet_list::render_tweet_list(state, cx))
             .child(toolbar::render_bulk_bar(state, cx)),
     );
-    if show_inspector {
-        content = content.child(inspector(state, cx));
+    if show_split {
+        content = content
+            .child(list_resize_handle(state, cx))
+            .child(inspector(state, cx));
     }
     content
 }
 
-fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let can_export = !state.loading && !state.filtered.is_empty();
+fn list_resize_handle(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::IntoElement {
+    let dragging = state.split_drag.is_some();
     div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h(px(0.))
-        .p_4()
-        .gap_3()
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child("数据洞察"),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .gap_2()
-                        .child(btn(
-                            "insights-export-csv",
-                            "导出 CSV",
-                            false,
-                            can_export,
-                            cx.listener(|this, _, window, cx| {
-                                this.export_tweets(ExportFormat::Csv, window, cx)
-                            }),
-                        ))
-                        .child(btn(
-                            "insights-export-json",
-                            "导出 JSON",
-                            false,
-                            can_export,
-                            cx.listener(|this, _, window, cx| {
-                                this.export_tweets(ExportFormat::Json, window, cx)
-                            }),
-                        )),
-                ),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child("统计范围 = 内容库当前已生效筛选；点击直方图或预设会回到内容库。"),
-        )
-        .child(stats_panel::render_stats_panel(state, cx))
-        .child(section_label("排名预设"))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_2()
-                .child(btn(
-                    "insight-like-high",
-                    "7天 · 点赞率最高",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_rank_preset(
-                            TimeRange::Days7,
-                            SortField::LikeRate,
-                            SortOrder::Desc,
-                            Some(20),
-                            cx,
-                        );
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-low-views",
-                    "30天 · 曝光最低",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_rank_preset(
-                            TimeRange::Days30,
-                            SortField::Views,
-                            SortOrder::Asc,
-                            Some(50),
-                            cx,
-                        );
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-bookmark",
-                    "30天 · 收藏率最高",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_rank_preset(
-                            TimeRange::Days30,
-                            SortField::BookmarkRate,
-                            SortOrder::Desc,
-                            Some(20),
-                            cx,
-                        );
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-low-10",
-                    "≤10 曝光",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_low_exposure_preset(10, cx);
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-low-20",
-                    "≤20 曝光",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_low_exposure_preset(20, cx);
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-low-50",
-                    "≤50 曝光待清理",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_low_exposure_preset(50, cx);
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                ))
-                .child(btn(
-                    "insight-low-100",
-                    "≤100 曝光",
-                    false,
-                    !state.loading,
-                    cx.listener(|this, _, _window, cx| {
-                        this.apply_low_exposure_preset(100, cx);
-                        this.active_route = Route::Library;
-                        cx.notify();
-                    }),
-                )),
+        .id("library-list-resize")
+        .flex_none()
+        .w(px(6.))
+        .h_full()
+        .cursor(CursorStyle::ResizeLeftRight)
+        .bg(theme::c(if dragging {
+            theme::ACCENT
+        } else {
+            theme::BORDER
+        }))
+        .hover(|s| s.bg(theme::c(theme::ACCENT)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                if event.click_count >= 2 {
+                    this.reset_split_width(cx);
+                } else {
+                    this.begin_split_drag(f32::from(event.position.x), cx);
+                }
+            }),
         )
 }
 
@@ -863,13 +857,23 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             ))
     });
     let has_candidates = !state.loading && !candidate_ids.is_empty();
-    let can_preview_delete = has_candidates && state.credentials_ok;
-    let can_open_delete_confirm =
-        can_preview_delete && state.has_valid_backup() && state.has_valid_preview();
+    let can_preview_delete = has_candidates;
+    let can_open_delete_confirm = has_candidates;
     let confirm = state.delete_confirm.as_ref();
     let confirm_ready = state.delete_confirm_is_ready();
-    let expected_count = confirm.map(|c| c.expected_count).unwrap_or(candidate_ids.len());
+    let expected_count = confirm
+        .map(|c| c.expected_count)
+        .unwrap_or(candidate_ids.len());
     let selected_token = confirm.and_then(|c| c.selected);
+    let typed_confirm = confirm.map(|c| c.typed.as_str()).unwrap_or("").to_string();
+    let typed_empty = typed_confirm.is_empty();
+    let next_hint = cleanup_next_hint(
+        candidate_ids.len(),
+        state.credentials_ok,
+        state.has_valid_backup(),
+        state.has_valid_preview(),
+        confirm,
+    );
     div()
         .flex()
         .flex_col()
@@ -887,23 +891,41 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             div()
                 .text_sm()
                 .text_color(theme::c(theme::TEXT_MUTED))
-                .child("候选集合会随着每次修改生成新版本；备份与预演必须针对同一版本。"),
+                .child(next_hint),
         )
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_2()
-                .child(step_card("1", "复核候选", !candidate_ids.is_empty()))
-                .child(step_card("2", "创建备份", state.has_valid_backup()))
-                .child(step_card("3", "预演删除", state.has_valid_preview()))
+        .child({
+            let stacked = state.layout_mode.stack_cleanup_steps();
+            let steps = if stacked {
+                div().flex().flex_col().gap_2()
+            } else {
+                div().flex().flex_row().flex_wrap().gap_2()
+            };
+            steps
+                .child(step_card(
+                    "1",
+                    "复核候选",
+                    !candidate_ids.is_empty(),
+                    stacked,
+                ))
+                .child(step_card(
+                    "2",
+                    "创建备份",
+                    state.has_valid_backup(),
+                    stacked,
+                ))
+                .child(step_card(
+                    "3",
+                    "预演删除",
+                    state.has_valid_preview(),
+                    stacked,
+                ))
                 .child(step_card(
                     "4",
                     "真实删除",
                     can_open_delete_confirm && confirm_ready,
-                )),
-        )
+                    stacked,
+                ))
+        })
         .child(
             div()
                 .flex()
@@ -934,7 +956,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     "preview-cleanup",
                     "预演删除",
                     true,
-                    can_preview_delete && state.has_valid_backup(),
+                    can_preview_delete,
                     cx.listener(|this, _, window, cx| this.preview_selected(window, cx)),
                 ))
                 .child(danger_btn(
@@ -1086,15 +1108,12 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                             )),
                     )
                     .when(!outcome.failed.is_empty(), |box_el| {
-                        box_el.child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::c(theme::DANGER))
-                                .child(format!(
-                                    "仍留在候选中的失败项 {} 条：{sample_fail}",
-                                    outcome.failed.len()
-                                )),
-                        )
+                        box_el.child(div().text_xs().text_color(theme::c(theme::DANGER)).child(
+                            format!(
+                                "仍留在候选中的失败项 {} 条：{sample_fail}",
+                                outcome.failed.len()
+                            ),
+                        ))
                     }),
             )
         })
@@ -1123,7 +1142,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         div()
                             .text_xs()
                             .text_color(theme::c(theme::TEXT_MUTED))
-                            .child("请选择确认方式之一（等同于输入数量或 DELETE）："),
+                            .child("可点 chip，或输入确切数量 / DELETE"),
                     )
                     .child(
                         div()
@@ -1136,10 +1155,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                                 format!("确认数量 {expected_count}"),
                                 selected_token == Some(DeleteConfirmToken::Count),
                                 cx.listener(|this, _, _window, cx| {
-                                    this.select_delete_confirm_token(
-                                        DeleteConfirmToken::Count,
-                                        cx,
-                                    )
+                                    this.select_delete_confirm_token(DeleteConfirmToken::Count, cx)
                                 }),
                             ))
                             .child(toggle_chip(
@@ -1158,11 +1174,71 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         div()
                             .flex()
                             .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .id("delete-confirm-typed")
+                                    .flex()
+                                    .flex_1()
+                                    .items_center()
+                                    .min_h(px(30.))
+                                    .px_2()
+                                    .rounded_md()
+                                    .bg(theme::c(theme::BG))
+                                    .border_1()
+                                    .border_color(theme::c(theme::BORDER_STRONG))
+                                    .tab_index(0)
+                                    .on_key_down(cx.listener(
+                                        |this, event: &KeyDownEvent, _window, cx| {
+                                            let key = event.keystroke.key.as_str();
+                                            if key == "backspace" || key == "delete" {
+                                                this.backspace_delete_confirm(cx);
+                                                cx.stop_propagation();
+                                            } else if let Some(ch) =
+                                                event.keystroke.key_char.as_deref()
+                                            {
+                                                if ch.chars().any(|c| !c.is_control()) {
+                                                    this.push_delete_confirm_text(ch, cx);
+                                                    cx.stop_propagation();
+                                                }
+                                            }
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(theme::c(if typed_empty {
+                                                theme::TEXT_MUTED
+                                            } else {
+                                                theme::TEXT
+                                            }))
+                                            .child(if typed_empty {
+                                                "输入数量或 DELETE".to_string()
+                                            } else {
+                                                typed_confirm.clone()
+                                            }),
+                                    ),
+                            )
+                            .child(btn(
+                                "delete-confirm-backspace",
+                                "退格",
+                                false,
+                                !state.loading && !typed_empty,
+                                cx.listener(|this, _, _window, cx| {
+                                    this.backspace_delete_confirm(cx)
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
                             .gap_2()
                             .child(danger_btn(
                                 "delete-confirm-execute",
                                 "确认并删除",
-                                confirm_ready && !state.loading,
+                                !state.loading,
                                 cx.listener(|this, _, window, cx| {
                                     this.confirm_and_delete(window, cx)
                                 }),
@@ -1172,9 +1248,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                                 "取消",
                                 false,
                                 !state.loading,
-                                cx.listener(|this, _, _window, cx| {
-                                    this.cancel_delete_confirm(cx)
-                                }),
+                                cx.listener(|this, _, _window, cx| this.cancel_delete_confirm(cx)),
                             )),
                     ),
             )
@@ -1206,7 +1280,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
         })
 }
 
-fn step_card(number: &str, label: &str, done: bool) -> Div {
+fn step_card(number: &str, label: &str, done: bool, stacked: bool) -> Div {
     div()
         .flex()
         .flex_row()
@@ -1214,6 +1288,7 @@ fn step_card(number: &str, label: &str, done: bool) -> Div {
         .gap_2()
         .px_3()
         .py_2()
+        .when(stacked, |el| el.w_full())
         .rounded_md()
         .bg(if done {
             theme::c(theme::CHIP_ACTIVE)
@@ -1243,9 +1318,9 @@ fn step_card(number: &str, label: &str, done: bool) -> Div {
 
 pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> Div {
     let page = match state.active_route {
-        Route::Library => render_library(state, cx),
-        Route::Insights => render_insights(state, cx),
-        Route::Cleanup => render_cleanup(state, cx),
+        Route::Library => render_library(state, cx).into_any_element(),
+        Route::Insights => crate::views::render_insights(state, cx).into_any_element(),
+        Route::Cleanup => render_cleanup(state, cx).into_any_element(),
     };
     div()
         .flex()

@@ -45,14 +45,8 @@ pub fn render_stats_panel(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(stat_card("中位曝光", format!("{:.1}", s.median_views)))
                 .child(stat_card("最低曝光", format!("{}", s.min_views)))
                 .child(stat_card("最高曝光", format!("{}", s.max_views)))
-                .child(stat_card(
-                    "均赞率",
-                    Tweet::format_rate(s.avg_like_rate),
-                ))
-                .child(stat_card(
-                    "均藏率",
-                    Tweet::format_rate(s.avg_bookmark_rate),
-                ))
+                .child(stat_card("均赞率", Tweet::format_rate(s.avg_like_rate)))
+                .child(stat_card("均藏率", Tweet::format_rate(s.avg_bookmark_rate)))
                 .child(stat_card(
                     "均互率",
                     Tweet::format_rate(s.avg_engagement_rate),
@@ -71,54 +65,60 @@ pub fn render_stats_panel(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .children(state.histogram.iter().enumerate().map(|(idx, (label, count))| {
-                    let ratio = *count as f32 / max_bucket as f32;
-                    let bar_w = (ratio * 220.0).max(if *count > 0 { 4.0 } else { 0.0 });
-                    let bucket_label = label.clone();
-                    let click_label = label.clone();
-                    let enabled = !state.loading;
-                    div()
-                        .id(SharedString::from(format!("hist-bucket-{idx}")))
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .px_1()
-                        .py_1()
-                        .rounded_sm()
-                        .cursor_pointer()
-                        .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            if enabled {
-                                this.apply_histogram_bucket(&click_label, cx);
-                            }
-                        }))
-                        .child(
+                .children(
+                    state
+                        .histogram
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (label, count))| {
+                            let ratio = *count as f32 / max_bucket as f32;
+                            let bar_w = (ratio * 220.0).max(if *count > 0 { 4.0 } else { 0.0 });
+                            let bucket_label = label.clone();
+                            let click_label = label.clone();
+                            let enabled = !state.loading;
                             div()
-                                .w(px(72.))
-                                .text_xs()
-                                .text_color(theme::c(theme::TEXT_MUTED))
-                                .child(bucket_label),
-                        )
-                        .child(
-                            div()
-                                .h(px(12.))
-                                .w(px(bar_w))
+                                .id(SharedString::from(format!("hist-bucket-{idx}")))
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_2()
+                                .px_1()
+                                .py_1()
                                 .rounded_sm()
-                                .bg(theme::c(theme::HIST_BAR)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::c(theme::TEXT))
-                                .child(format!("{count}")),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme::c(theme::ACCENT))
-                                .child("筛选"),
-                        )
-                })),
+                                .cursor_pointer()
+                                .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
+                                .on_click(cx.listener(move |this, _, _window, cx| {
+                                    if enabled {
+                                        this.apply_histogram_bucket(&click_label, cx);
+                                    }
+                                }))
+                                .child(
+                                    div()
+                                        .w(px(72.))
+                                        .text_xs()
+                                        .text_color(theme::c(theme::TEXT_MUTED))
+                                        .child(bucket_label),
+                                )
+                                .child(
+                                    div()
+                                        .h(px(12.))
+                                        .w(px(bar_w))
+                                        .rounded_sm()
+                                        .bg(theme::c(theme::HIST_BAR)),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme::c(theme::TEXT))
+                                        .child(format!("{count}")),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme::c(theme::ACCENT))
+                                        .child("筛选"),
+                                )
+                        }),
+                ),
         )
 }
