@@ -1,9 +1,42 @@
 //! Library page toolbar and the transient selection bar.
 
-use crate::app::{chip_label, AppState, AppliedFilterChip, ExportFormat};
+use crate::app::{chip_label, AppState, AppliedFilterChip, ExportFormat, Route};
 use crate::theme;
 use crate::widgets::{btn, removable_chip, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
+
+pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
+    state.cleanup_notice.as_ref().map(|msg| {
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .px_4()
+            .py_2()
+            .bg(theme::c(theme::CHIP_ACTIVE))
+            .border_b_1()
+            .border_color(theme::c(theme::ACCENT))
+            .child(
+                theme::type_body(div().flex_1().text_color(theme::c(theme::TEXT))).child(msg.clone()),
+            )
+            .child(btn(
+                "notice-go-cleanup",
+                "去安全清理",
+                true,
+                true,
+                cx.listener(|this, _, _window, cx| this.set_route(Route::Cleanup, cx)),
+            ))
+            .child(btn(
+                "notice-dismiss",
+                "继续挑选",
+                false,
+                true,
+                cx.listener(|this, _, _window, cx| this.dismiss_cleanup_notice(cx)),
+            ))
+    })
+}
 
 pub fn active_filter_summary(state: &AppState) -> String {
     let d = &state.applied_filter;
@@ -20,19 +53,13 @@ pub fn active_filter_summary(state: &AppState) -> String {
     .into_iter()
     .filter(|active| *active)
     .count();
-    let dirty = if state.filter_draft_is_dirty() {
-        " · 有未应用修改"
-    } else {
-        ""
-    };
     format!(
-        "{} · {} · {} · {} 类 · {} 条结果{}",
+        "{} · {} · {} · {} 类 · {} 条结果",
         d.time_range.label_zh(),
         views,
         d.sort.label_zh(),
         kind_count,
-        state.filtered.len(),
-        dirty
+        state.filtered.len()
     )
 }
 
@@ -161,21 +188,6 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     cx.notify();
                 }),
             ),
-            toggle_chip(
-                "draft-dirty",
-                if state.filter_draft_is_dirty() {
-                    "未应用修改"
-                } else {
-                    "已生效"
-                },
-                state.filter_draft_is_dirty(),
-                cx.listener(|this, _, _window, cx| {
-                    if this.filter_draft_is_dirty() {
-                        this.filter_drawer_open = true;
-                        cx.notify();
-                    }
-                }),
-            ),
         ]))
         .child(div().flex().flex_row().flex_wrap().gap_1().children({
             let enabled = !state.loading;
@@ -236,9 +248,9 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     theme::c(theme::TEXT_MUTED)
                 })
                 .child(if has_selection {
-                    format!("已选 {} 条", state.selected.len())
+                    format!("已选 {} 条，加入后仍留在内容库", state.selected.len())
                 } else if has_focus {
-                    "已查看当前推文，可加入安全清理".into()
+                    "已查看当前推文，可加入安全清理（不会离开本页）".into()
                 } else {
                     "勾选左侧方框，或点开一条后加入安全清理".into()
                 }),

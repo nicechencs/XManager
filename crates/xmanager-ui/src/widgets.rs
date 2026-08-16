@@ -1,6 +1,6 @@
-//! Minimal GPUI widgets built on `div()`.
+//! Minimal GPUI widgets built on `div()`, using theme type and space tokens.
 
-use crate::theme;
+use crate::theme::{self, control, radius, space};
 use gpui::{
     div, prelude::*, px, App, ClickEvent, Div, InteractiveElement, Rgba, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window,
@@ -30,32 +30,33 @@ pub fn btn(
         theme::c(theme::TEXT)
     };
 
-    div()
-        .id(id.into())
-        .flex()
-        .items_center()
-        .justify_center()
-        .h(px(30.))
-        .px_3()
-        .rounded_md()
-        .bg(bg)
-        .text_color(fg)
-        .text_sm()
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .when(enabled, |el| {
-            el.cursor_pointer()
-                .hover(|s| {
-                    s.bg(if primary {
-                        theme::c(theme::ACCENT_HOVER)
-                    } else {
-                        theme::c(theme::BG_HOVER)
-                    })
+    theme::type_label(
+        div()
+            .id(id.into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(control::HEIGHT))
+            .px(px(space::MD))
+            .rounded(px(radius::MD))
+            .bg(bg)
+            .text_color(fg)
+            .border_1()
+            .border_color(theme::c(theme::BORDER)),
+    )
+    .when(enabled, |el| {
+        el.cursor_pointer()
+            .hover(|s| {
+                s.bg(if primary {
+                    theme::c(theme::ACCENT_HOVER)
+                } else {
+                    theme::c(theme::BG_HOVER)
                 })
-                .active(|s| s.opacity(0.85))
-                .on_click(on_click)
-        })
-        .child(label)
+            })
+            .active(|s| s.opacity(0.85))
+            .on_click(on_click)
+    })
+    .child(label)
 }
 
 pub fn danger_btn(
@@ -65,34 +66,35 @@ pub fn danger_btn(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     let label = label.into();
-    div()
-        .id(id.into())
-        .flex()
-        .items_center()
-        .justify_center()
-        .h(px(30.))
-        .px_3()
-        .rounded_md()
-        .bg(if enabled {
-            theme::c(theme::DANGER)
-        } else {
-            theme::c(theme::DISABLED_DANGER_BG)
-        })
-        .text_color(if enabled {
-            theme::c(theme::TEXT_ON_DANGER)
-        } else {
-            theme::c(theme::DISABLED_TEXT)
-        })
-        .text_sm()
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .when(enabled, |el| {
-            el.cursor_pointer()
-                .hover(|s| s.bg(theme::c(theme::DANGER_HOVER)))
-                .active(|s| s.opacity(0.85))
-                .on_click(on_click)
-        })
-        .child(label)
+    theme::type_label(
+        div()
+            .id(id.into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(control::HEIGHT))
+            .px(px(space::MD))
+            .rounded(px(radius::MD))
+            .bg(if enabled {
+                theme::c(theme::DANGER)
+            } else {
+                theme::c(theme::DISABLED_DANGER_BG)
+            })
+            .text_color(if enabled {
+                theme::c(theme::TEXT_ON_DANGER)
+            } else {
+                theme::c(theme::DISABLED_TEXT)
+            })
+            .border_1()
+            .border_color(theme::c(theme::BORDER)),
+    )
+    .when(enabled, |el| {
+        el.cursor_pointer()
+            .hover(|s| s.bg(theme::c(theme::DANGER_HOVER)))
+            .active(|s| s.opacity(0.85))
+            .on_click(on_click)
+    })
+    .child(label)
 }
 
 pub fn toggle_chip(
@@ -101,93 +103,83 @@ pub fn toggle_chip(
     active: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    div()
-        .id(id.into())
-        .flex()
-        .items_center()
-        .justify_center()
-        .h(px(26.))
-        .px_2()
-        .rounded_md()
-        .text_sm()
-        .cursor_pointer()
-        .bg(if active {
-            theme::c(theme::CHIP_ACTIVE)
-        } else {
-            theme::c(theme::CHIP)
-        })
-        .text_color(if active {
-            theme::c(theme::TEXT)
-        } else {
-            theme::c(theme::TEXT_MUTED)
-        })
-        .border_1()
-        .border_color(if active {
-            theme::c(theme::ACCENT)
-        } else {
-            theme::c(theme::BORDER)
-        })
-        .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
-        .on_click(on_click)
-        .child(label.into())
+    theme::type_body(
+        div()
+            .id(id.into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(control::CHIP_HEIGHT))
+            .px(px(space::SM))
+            .rounded(px(radius::MD))
+            .cursor_pointer()
+            .bg(if active {
+                theme::c(theme::CHIP_ACTIVE)
+            } else {
+                theme::c(theme::CHIP)
+            })
+            .text_color(if active {
+                theme::c(theme::TEXT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            })
+            .border_1()
+            .border_color(if active {
+                theme::c(theme::ACCENT)
+            } else {
+                theme::c(theme::BORDER)
+            }),
+    )
+    .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
+    .on_click(on_click)
+    .child(label.into())
 }
 
 pub fn stat_card(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap_1()
+        .gap(px(space::XS))
         .min_w(px(96.))
-        .px_3()
-        .py_2()
-        .rounded_md()
+        .px(px(space::MD))
+        .py(px(space::SM))
+        .rounded(px(radius::MD))
         .bg(theme::c(theme::BG_ELEVATED))
         .border_1()
         .border_color(theme::c(theme::BORDER))
+        .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
         .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(label.into()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
+            theme::type_label(div().text_color(theme::c(theme::TEXT)).font_weight(gpui::FontWeight::SEMIBOLD))
                 .child(value.into()),
         )
 }
 
 pub fn section_label(text: impl Into<SharedString>) -> Div {
-    div()
-        .text_sm()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(theme::c(theme::TEXT_MUTED))
-        .child(text.into())
+    theme::type_label(div().text_color(theme::c(theme::TEXT_MUTED))).child(text.into())
 }
 
 pub fn checkbox_mark(checked: bool) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(px(16.))
-        .rounded_sm()
-        .border_1()
-        .border_color(if checked {
-            theme::c(theme::ACCENT)
-        } else {
-            theme::c(theme::BORDER_STRONG)
-        })
-        .bg(if checked {
-            theme::c(theme::ACCENT)
-        } else {
-            theme::c(theme::BG)
-        })
-        .text_xs()
-        .text_color(theme::c(theme::TEXT_ON_ACCENT))
-        .child(if checked { "✓" } else { " " })
+    theme::type_caption(
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(16.))
+            .rounded(px(radius::SM))
+            .border_1()
+            .border_color(if checked {
+                theme::c(theme::ACCENT)
+            } else {
+                theme::c(theme::BORDER_STRONG)
+            })
+            .bg(if checked {
+                theme::c(theme::ACCENT)
+            } else {
+                theme::c(theme::BG)
+            })
+            .text_color(theme::c(theme::TEXT_ON_ACCENT)),
+    )
+    .child(if checked { "✓" } else { " " })
 }
 
 pub fn stepper(
@@ -202,20 +194,25 @@ pub fn stepper(
     let id_plus = format!("{id_prefix}-plus");
     let on_minus = on_delta.clone();
     let on_plus = on_delta;
-    let range_label = format!("[{min}–{max}]");
+    let range_label = format!("[{min}–{max}] · 0 为不限");
+    let value_label = if value == 0 {
+        "不限".to_string()
+    } else {
+        value.to_string()
+    };
 
     div()
         .flex()
         .items_center()
-        .gap_1()
+        .gap(px(space::XS))
         .child(
             div()
                 .id(SharedString::from(id_minus))
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(24.))
-                .rounded_sm()
+                .size(px(control::ICON))
+                .rounded(px(radius::SM))
                 .bg(theme::c(theme::CHIP))
                 .text_color(theme::c(theme::TEXT))
                 .cursor_pointer()
@@ -226,17 +223,18 @@ pub fn stepper(
                 .child("−"),
         )
         .child(
-            div()
-                .min_w(px(48.))
-                .px_2()
-                .py_1()
-                .rounded_sm()
-                .bg(theme::c(theme::BG))
-                .border_1()
-                .border_color(theme::c(theme::BORDER))
-                .text_sm()
-                .text_color(theme::c(theme::TEXT))
-                .child(format!("{value}")),
+            theme::type_body(
+                div()
+                    .min_w(px(56.))
+                    .px(px(space::SM))
+                    .py(px(space::XS))
+                    .rounded(px(radius::SM))
+                    .bg(theme::c(theme::BG))
+                    .border_1()
+                    .border_color(theme::c(theme::BORDER))
+                    .text_color(theme::c(theme::TEXT)),
+            )
+            .child(value_label),
         )
         .child(
             div()
@@ -244,8 +242,8 @@ pub fn stepper(
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(24.))
-                .rounded_sm()
+                .size(px(control::ICON))
+                .rounded(px(radius::SM))
                 .bg(theme::c(theme::CHIP))
                 .text_color(theme::c(theme::TEXT))
                 .cursor_pointer()
@@ -255,12 +253,7 @@ pub fn stepper(
                 })
                 .child("+"),
         )
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_DIM))
-                .child(range_label),
-        )
+        .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM))).child(range_label))
 }
 
 pub fn truncate_text(s: &str, max_chars: usize) -> String {
@@ -284,44 +277,37 @@ pub fn kind_color(kind: PostKind) -> Rgba {
 }
 
 pub fn kind_badge(kind: PostKind) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .h(px(20.))
-        .px_2()
-        .rounded_md()
-        .bg(theme::c(theme::CHIP))
-        .text_xs()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(kind_color(kind))
-        .child(kind.label_zh().to_string())
+    theme::type_caption(
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(20.))
+            .px(px(space::SM))
+            .rounded(px(radius::MD))
+            .bg(theme::c(theme::CHIP))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(kind_color(kind)),
+    )
+    .child(kind.label_zh().to_string())
 }
 
 pub fn metric_tile(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap_1()
+        .gap(px(space::XS))
         .min_w(px(88.))
         .flex_1()
-        .px_2()
-        .py_2()
-        .rounded_md()
+        .px(px(space::SM))
+        .py(px(space::SM))
+        .rounded(px(radius::MD))
         .bg(theme::c(theme::BG_ELEVATED))
         .border_1()
         .border_color(theme::c(theme::BORDER))
+        .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
         .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(label.into()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
+            theme::type_label(div().text_color(theme::c(theme::TEXT)).font_weight(gpui::FontWeight::SEMIBOLD))
                 .child(value.into()),
         )
 }
@@ -330,20 +316,9 @@ pub fn page_heading(title: impl Into<SharedString>, subtitle: impl Into<SharedSt
     div()
         .flex()
         .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
-                .child(title.into()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(subtitle.into()),
-        )
+        .gap(px(space::XS))
+        .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(title.into()))
+        .child(theme::type_body(div().text_color(theme::c(theme::TEXT_MUTED))).child(subtitle.into()))
 }
 
 pub fn removable_chip(
@@ -352,62 +327,61 @@ pub fn removable_chip(
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
-    div()
-        .id(id.into())
-        .flex()
-        .items_center()
-        .gap_1()
-        .h(px(24.))
-        .px_2()
-        .rounded_md()
-        .bg(theme::c(theme::CHIP))
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .text_xs()
-        .text_color(if enabled {
-            theme::c(theme::TEXT)
-        } else {
-            theme::c(theme::DISABLED_TEXT)
-        })
-        .when(enabled, |el| {
-            el.cursor_pointer()
-                .hover(|s| {
-                    s.bg(theme::c(theme::BG_HOVER))
-                        .border_color(theme::c(theme::ACCENT))
-                })
-                .on_click(on_click)
-        })
-        .child(label.into())
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child("×"),
-        )
+    theme::type_caption(
+        div()
+            .id(id.into())
+            .flex()
+            .items_center()
+            .gap(px(space::XS))
+            .h(px(24.))
+            .px(px(space::SM))
+            .rounded(px(radius::MD))
+            .bg(theme::c(theme::CHIP))
+            .border_1()
+            .border_color(theme::c(theme::BORDER))
+            .text_color(if enabled {
+                theme::c(theme::TEXT)
+            } else {
+                theme::c(theme::DISABLED_TEXT)
+            }),
+    )
+    .when(enabled, |el| {
+        el.cursor_pointer()
+            .hover(|s| {
+                s.bg(theme::c(theme::BG_HOVER))
+                    .border_color(theme::c(theme::ACCENT))
+            })
+            .on_click(on_click)
+    })
+    .child(label.into())
+    .child(
+        theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child("×"),
+    )
 }
 
 pub fn count_badge(count: usize) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .min_w(px(20.))
-        .h(px(18.))
-        .px_1()
-        .rounded_md()
-        .bg(if count > 0 {
-            theme::c(theme::CHIP_ACTIVE)
-        } else {
-            theme::c(theme::CHIP)
-        })
-        .text_xs()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(if count > 0 {
-            theme::c(theme::TEXT)
-        } else {
-            theme::c(theme::TEXT_MUTED)
-        })
-        .child(count.to_string())
+    theme::type_caption(
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(20.))
+            .h(px(18.))
+            .px(px(space::XS))
+            .rounded(px(radius::MD))
+            .bg(if count > 0 {
+                theme::c(theme::CHIP_ACTIVE)
+            } else {
+                theme::c(theme::CHIP)
+            })
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(if count > 0 {
+                theme::c(theme::TEXT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            }),
+    )
+    .child(count.to_string())
 }
 
 pub fn nav_destination(
@@ -426,19 +400,19 @@ pub fn nav_destination(
             el.flex_col()
                 .items_center()
                 .justify_center()
-                .gap_1()
-                .py_2()
-                .px_1()
+                .gap(px(space::XS))
+                .py(px(space::SM))
+                .px(px(space::XS))
         })
         .when(!compact, |el| {
             el.flex_row()
                 .items_center()
-                .gap_2()
-                .px_3()
-                .py_2()
+                .gap(px(space::SM))
+                .px(px(space::MD))
+                .py(px(space::SM))
         })
         .w_full()
-        .rounded_md()
+        .rounded(px(radius::MD))
         .cursor_pointer()
         .bg(if active {
             theme::c(theme::CHIP_ACTIVE)
@@ -454,24 +428,25 @@ pub fn nav_destination(
         .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
         .on_click(on_click)
         .child(
-            div()
-                .when(active && !compact, |el| {
-                    el.pl_1()
-                        .border_l_2()
-                        .border_color(theme::c(theme::ACCENT))
-                })
-                .text_sm()
-                .font_weight(if active {
-                    gpui::FontWeight::SEMIBOLD
-                } else {
-                    gpui::FontWeight::MEDIUM
-                })
-                .text_color(if active {
-                    theme::c(theme::TEXT)
-                } else {
-                    theme::c(theme::TEXT_MUTED)
-                })
-                .child(label),
+            theme::type_label(
+                div()
+                    .when(active && !compact, |el| {
+                        el.pl(px(space::XS))
+                            .border_l_2()
+                            .border_color(theme::c(theme::ACCENT))
+                    })
+                    .font_weight(if active {
+                        gpui::FontWeight::SEMIBOLD
+                    } else {
+                        gpui::FontWeight::MEDIUM
+                    })
+                    .text_color(if active {
+                        theme::c(theme::TEXT)
+                    } else {
+                        theme::c(theme::TEXT_MUTED)
+                    }),
+            )
+            .child(label),
         )
         .when_some(badge, |el, count| el.child(count_badge(count)))
 }

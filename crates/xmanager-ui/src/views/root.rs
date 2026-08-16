@@ -1,7 +1,8 @@
 //! Application shell and the three product routes.
 
 use crate::app::{
-    cleanup_next_hint, resolve_focused_tweet, AppState, DeleteConfirmToken, ExportFormat, Route,
+    cleanup_next_hint, resolve_focused_tweet, tweet_preview_label, AppState, DeleteConfirmToken,
+    ExportFormat, Route,
 };
 use crate::theme;
 use crate::views::{status_bar, toolbar, tweet_list};
@@ -34,7 +35,7 @@ fn kind_chip(
         cx.listener(move |this, _, _window, cx| {
             let value = field(&mut this.filter_draft.kinds);
             *value = !*value;
-            cx.notify();
+            this.apply_filters(cx);
         }),
     )
 }
@@ -79,37 +80,10 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     ))
                 }),
         )
-        .when(state.filter_draft_is_dirty(), |el| {
-            el.child(
-                div()
-                    .px_2()
-                    .py_2()
-                    .rounded_md()
-                    .bg(theme::c(theme::CHIP_ACTIVE))
-                    .border_1()
-                    .border_color(theme::c(theme::ACCENT))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme::c(theme::TEXT))
-                            .child("有未应用修改，点「应用筛选」后才会更新列表。"),
-                    ),
-            )
-        })
-        .child(section_label("拉取数量"))
-        .child(div().flex().flex_row().flex_wrap().gap_1().children(
-            [50usize, 100, 200, 500, 1000].into_iter().map(|n| {
-                toggle_chip(
-                    format!("fetch-limit-{n}"),
-                    n.to_string(),
-                    state.fetch_limit == n,
-                    cx.listener(move |this, _, _window, cx| {
-                        this.fetch_limit = n;
-                        cx.notify();
-                    }),
-                )
-            }),
-        ))
+        .child(
+            theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
+                .child("改条件后列表立即更新。拉取数量只影响下次「拉取并分析」。"),
+        )
         .child(section_label("时间范围"))
         .child(div().flex().flex_row().flex_wrap().gap_1().children(
             TimeRange::PRESETS.iter().copied().map(|range| {
@@ -120,7 +94,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     cx.listener(move |this, _, _window, cx| {
                         this.filter_draft.time_range = range;
                         this.filter_draft.newer_than_days = None;
-                        cx.notify();
+                        this.apply_filters(cx);
                     }),
                 )
             }),
@@ -161,15 +135,6 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     cx,
                 )),
         )
-        .child(toggle_chip(
-            "include-retweets",
-            "拉取含转发",
-            d.include_retweets,
-            cx.listener(|this, _, _window, cx| {
-                this.filter_draft.include_retweets = !this.filter_draft.include_retweets;
-                cx.notify();
-            }),
-        ))
         .child(section_label("曝光上限"))
         .child({
             let entity = cx.weak_entity();
@@ -184,7 +149,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                         .update(app, |this, cx| {
                             this.filter_draft.max_views =
                                 clamp_opt(this.filter_draft.max_views, delta, 0, 100_000);
-                            cx.notify();
+                            this.apply_filters(cx);
                         })
                         .ok();
                 },
@@ -204,7 +169,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                         .update(app, |this, cx| {
                             this.filter_draft.min_views =
                                 clamp_opt(this.filter_draft.min_views, delta, 0, 100_000);
-                            cx.notify();
+                            this.apply_filters(cx);
                         })
                         .ok();
                 },
@@ -224,7 +189,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                         .update(app, |this, cx| {
                             this.filter_draft.max_engagement =
                                 clamp_opt(this.filter_draft.max_engagement, delta, 0, 1_000_000);
-                            cx.notify();
+                            this.apply_filters(cx);
                         })
                         .ok();
                 },
@@ -244,7 +209,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                         .update(app, |this, cx| {
                             this.filter_draft.older_than_days =
                                 clamp_opt(this.filter_draft.older_than_days, delta, 0, 3600);
-                            cx.notify();
+                            this.apply_filters(cx);
                         })
                         .ok();
                 },
@@ -271,7 +236,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                         d.sort == field,
                         cx.listener(move |this, _, _window, cx| {
                             this.filter_draft.sort = field;
-                            cx.notify();
+                            this.apply_filters(cx);
                         }),
                     )
                 }),
@@ -289,7 +254,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     d.order == SortOrder::Asc,
                     cx.listener(|this, _, _window, cx| {
                         this.filter_draft.order = SortOrder::Asc;
-                        cx.notify();
+                        this.apply_filters(cx);
                     }),
                 ))
                 .child(toggle_chip(
@@ -298,7 +263,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                     d.order == SortOrder::Desc,
                     cx.listener(|this, _, _window, cx| {
                         this.filter_draft.order = SortOrder::Desc;
-                        cx.notify();
+                        this.apply_filters(cx);
                     }),
                 )),
         )
@@ -317,7 +282,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                             d.top_n == n,
                             cx.listener(move |this, _, _window, cx| {
                                 this.filter_draft.top_n = n;
-                                cx.notify();
+                                this.apply_filters(cx);
                             }),
                         )
                     }),
@@ -343,15 +308,10 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
         ))
         .child(btn(
             "apply-filters",
-            if state.filter_draft_is_dirty() {
-                "应用筛选 · 有修改"
-            } else {
-                "应用筛选"
-            },
+            "完成",
             true,
-            !state.loading,
+            true,
             cx.listener(|this, _, _window, cx| {
-                this.apply_filters(cx);
                 this.filter_drawer_open = false;
                 cx.notify();
             }),
@@ -365,6 +325,33 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 this.filter_draft = crate::app::FilterDraft::unrestricted();
                 this.apply_filters(cx);
                 this.filter_drawer_open = false;
+                cx.notify();
+            }),
+        ))
+        .child(section_label("下次拉取（不改当前列表）"))
+        .child(
+            theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
+                .child("改完后请到内容库点「拉取并分析」。"),
+        )
+        .child(div().flex().flex_row().flex_wrap().gap_1().children(
+            [50usize, 100, 200, 500, 1000].into_iter().map(|n| {
+                toggle_chip(
+                    format!("fetch-limit-{n}"),
+                    format!("{n} 条"),
+                    state.fetch_limit == n,
+                    cx.listener(move |this, _, _window, cx| {
+                        this.fetch_limit = n;
+                        cx.notify();
+                    }),
+                )
+            }),
+        ))
+        .child(toggle_chip(
+            "include-retweets",
+            "拉取含转发",
+            d.include_retweets,
+            cx.listener(|this, _, _window, cx| {
+                this.filter_draft.include_retweets = !this.filter_draft.include_retweets;
                 cx.notify();
             }),
         ))
@@ -464,7 +451,22 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                     )),
             )
             .child(context_metric("发布时间", tweet.display_date()))
-            .child(context_metric("推文 ID", id.clone()))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .py_1()
+                    .border_b_1()
+                    .border_color(theme::c(theme::BORDER))
+                    .child(
+                        theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
+                            .child("推文 ID"),
+                    )
+                    .child(
+                        theme::type_mono(div().text_color(theme::c(theme::TEXT))).child(id.clone()),
+                    ),
+            )
             .child(
                 div()
                     .flex()
@@ -573,7 +575,7 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                     div()
                         .text_xs()
                         .text_color(theme::c(theme::TEXT_DIM))
-                        .child("J / K 上下条 · 空格勾选 · / 打开筛选"),
+                        .child("J / K 上下条 · 空格勾选 · / 打开筛选 · 1 内容库 · 2 洞察 · 3 清理 · Esc 关闭"),
                 )
         }))
 }
@@ -623,9 +625,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .border_r_1()
         .border_color(theme::c(theme::BORDER))
         .child(
-            div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::BOLD)
+            theme::type_display(div().text_color(theme::c(theme::TEXT)))
                 .child(if show_labels { "XManager" } else { "XM" }),
         )
         .when(show_labels, |el| el.child(section_label("工作台")))
@@ -694,6 +694,12 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             !state.loading,
             cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
         ))
+        .when(show_labels, |el| {
+            el.child(
+                theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
+                    .child("J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页 · Esc 关闭"),
+            )
+        })
         .child(btn(
             "sidebar-theme",
             if show_labels {
@@ -806,6 +812,7 @@ fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div>
             .min_w(px(280.))
             .min_h(px(0.))
             .child(toolbar::render_toolbar(state, cx))
+            .children(toolbar::render_cleanup_notice(state, cx))
             .children(loading_banner(state))
             .child(tweet_list::render_tweet_list(state, cx))
             .child(toolbar::render_bulk_bar(state, cx)),
@@ -952,25 +959,25 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             steps
                 .child(step_card(
                     "1",
-                    "复核候选",
+                    "加入候选",
                     !candidate_ids.is_empty(),
                     stacked,
                 ))
                 .child(step_card(
                     "2",
-                    "创建备份",
-                    state.has_valid_backup(),
+                    "自动备份与预演",
+                    state.has_valid_backup() && state.has_valid_preview(),
                     stacked,
                 ))
                 .child(step_card(
                     "3",
-                    "预演删除",
-                    state.has_valid_preview(),
+                    "二次确认",
+                    confirm.is_some(),
                     stacked,
                 ))
                 .child(step_card(
                     "4",
-                    "真实删除",
+                    "确认并删除",
                     can_open_delete_confirm && confirm_ready,
                     stacked,
                 ))
@@ -985,31 +992,6 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(section_label(format!("{} 条候选", candidate_ids.len())))
                 .child(count_badge(candidate_ids.len()))
                 .child(div().flex_1())
-                .child(btn(
-                    "backup-csv",
-                    "备份 CSV",
-                    false,
-                    has_candidates,
-                    cx.listener(|this, _, window, cx| {
-                        this.export_candidates(ExportFormat::Csv, window, cx)
-                    }),
-                ))
-                .child(btn(
-                    "backup-json",
-                    "备份 JSON",
-                    false,
-                    has_candidates,
-                    cx.listener(|this, _, window, cx| {
-                        this.export_candidates(ExportFormat::Json, window, cx)
-                    }),
-                ))
-                .child(btn(
-                    "preview-cleanup",
-                    "预演删除",
-                    true,
-                    can_preview_delete,
-                    cx.listener(|this, _, window, cx| this.preview_selected(window, cx)),
-                ))
                 .child(danger_btn(
                     "delete-cleanup",
                     if confirm.is_some() {
@@ -1022,34 +1004,81 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 ))
                 .child(btn(
                     "clear-cleanup",
-                    "清空",
+                    if state.clear_cleanup_armed {
+                        "确认清空"
+                    } else {
+                        "清空候选"
+                    },
+                    state.clear_cleanup_armed,
+                    has_candidates,
+                    cx.listener(|this, _, _window, cx| this.request_clear_cleanup(cx)),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(section_label("可选"))
+                .child(
+                    theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
+                        .child("主按钮已包含备份和预演，以下仅在需要单独导出或复查时使用。"),
+                )
+                .child(btn(
+                    "backup-csv",
+                    "另存 CSV",
                     false,
                     has_candidates,
-                    cx.listener(|this, _, _window, cx| this.clear_cleanup_candidates(cx)),
+                    cx.listener(|this, _, window, cx| {
+                        this.export_candidates(ExportFormat::Csv, window, cx)
+                    }),
+                ))
+                .child(btn(
+                    "backup-json",
+                    "另存 JSON",
+                    false,
+                    has_candidates,
+                    cx.listener(|this, _, window, cx| {
+                        this.export_candidates(ExportFormat::Json, window, cx)
+                    }),
+                ))
+                .child(btn(
+                    "preview-cleanup",
+                    "只预演不删除",
+                    false,
+                    can_preview_delete,
+                    cx.listener(|this, _, window, cx| this.preview_selected(window, cx)),
                 )),
         )
         .when_some(state.preview_outcome.as_ref(), |el, outcome| {
             let sample_deletable = outcome
                 .deletable
                 .iter()
-                .take(8)
-                .cloned()
+                .take(6)
+                .map(|id| tweet_preview_label(id, &state.cleanup_snapshot, &state.all_tweets))
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("；");
             let sample_missing = outcome
                 .missing
                 .iter()
-                .take(8)
-                .cloned()
+                .take(6)
+                .map(|id| tweet_preview_label(id, &state.cleanup_snapshot, &state.all_tweets))
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("；");
             let sample_failed = outcome
                 .failed
                 .iter()
                 .take(3)
-                .map(|(id, err)| format!("{id}: {err}"))
+                .map(|(id, err)| {
+                    format!(
+                        "{}：{err}",
+                        tweet_preview_label(id, &state.cleanup_snapshot, &state.all_tweets)
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join("; ");
+                .join("；");
             el.child(
                 div()
                     .flex()
@@ -1112,17 +1141,22 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             let sample_ok = outcome
                 .succeeded
                 .iter()
-                .take(8)
-                .cloned()
+                .take(6)
+                .map(|id| tweet_preview_label(id, &state.cleanup_snapshot, &state.all_tweets))
                 .collect::<Vec<_>>()
-                .join(", ");
+                .join("；");
             let sample_fail = outcome
                 .failed
                 .iter()
                 .take(5)
-                .map(|(id, err)| format!("{id}: {err}"))
+                .map(|(id, err)| {
+                    format!(
+                        "{}：{err}",
+                        tweet_preview_label(id, &state.cleanup_snapshot, &state.all_tweets)
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join("; ");
+                .join("；");
             el.child(
                 div()
                     .flex()
@@ -1257,18 +1291,18 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                                         },
                                     ))
                                     .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme::c(if typed_empty {
+                                        theme::type_mono(
+                                            div().text_color(theme::c(if typed_empty {
                                                 theme::TEXT_MUTED
                                             } else {
                                                 theme::TEXT
-                                            }))
-                                            .child(if typed_empty {
-                                                "输入数量或 DELETE".to_string()
-                                            } else {
-                                                typed_confirm.clone()
-                                            }),
+                                            })),
+                                        )
+                                        .child(if typed_empty {
+                                            "输入数量或 DELETE".to_string()
+                                        } else {
+                                            typed_confirm.clone()
+                                        }),
                                     ),
                             )
                             .child(btn(
@@ -1383,14 +1417,16 @@ pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::I
         Route::Insights => crate::views::render_insights(state, cx).into_any_element(),
         Route::Cleanup => render_cleanup(state, cx).into_any_element(),
     };
-    div()
-        .id("xmanager-root")
-        .flex()
-        .flex_col()
-        .size_full()
-        .bg(theme::c(theme::BG))
-        .text_color(theme::c(theme::TEXT))
-        .tab_index(0)
+    theme::apply_root_type(
+        div()
+            .id("xmanager-root")
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(theme::c(theme::BG))
+            .text_color(theme::c(theme::TEXT))
+            .tab_index(0),
+    )
         .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
             if this.handle_workspace_key(event.keystroke.key.as_str(), cx) {
                 cx.stop_propagation();

@@ -9,7 +9,9 @@ XManager/
 ├── run.sh / run.bat           # macOS·Linux / Windows 启动
 ├── README.md                  # 主文档
 ├── docs/
-│   └── ARCHITECTURE.md        # 本文件
+│   ├── ARCHITECTURE.md        # 本文件
+│   ├── DESIGN.md              # 字号 / 间距 / 交互约定
+│   └── LOGGING.md
 ├── crates/
 │   ├── xmanager-core/         # 领域库：API / 筛选 / 导出（无 UI）
 │   │   ├── Cargo.toml
@@ -48,8 +50,9 @@ XManager/
 ## UI 壳层
 
 - **路由**：`Library | Insights | Cleanup`（共享 `AppState`，切页不丢筛选/候选）。
-- **筛选**：抽屉草稿 `filter_draft` vs 已生效 `applied_filter`；chip 可逐个移除。
-- **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。
+- **筛选**：抽屉改条件后立刻写入 `applied_filter` 并重算列表。拉取条数 / 含转发与筛选分开，只影响下次 API 请求。chip 只显示非默认条件，可逐个移除。
+- **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。加入候选不切页；`cleanup_notice` 横幅提供「去安全清理」。
+- **视觉**：色板、字号、行高、间距 token 在 `xmanager-ui` 的 `theme.rs`，约定见 [DESIGN.md](DESIGN.md)。
 - **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
 - **列表**：`uniform_list` 虚拟化渲染筛选结果。
 - **洞察**：KPI + 直方图 + 当前筛选 Top-N 排名（点击回内容库并聚焦）。
@@ -80,7 +83,7 @@ tweets[] → FilterOptions
 | 统计 | `summarize` / histogram | 数据洞察；直方图可点筛选 |
 | 排名 | 当前 `filtered` 顺序 | 洞察 Top-N 列表，点击回内容库 |
 | 导出 | `export_csv` / `export_json` | 内容库 / 洞察 / 清理备份 |
-| 安全删除 | `lookup_tweets` + `delete_tweet(s)` | 自动备份 → API 预演 → chip 二次确认 → 真删 |
+| 安全删除 | `lookup_tweets` + `delete_tweet(s)` | 加入后留在内容库；「真实删除」自动备份+预演 → chip 二次确认 → 真删 |
 | 本地日志 | `logging` | 启动初始化；API / 导出 / 清理审计（见 [LOGGING.md](LOGGING.md)） |
 | 外观 | — | 侧栏浅色/深色 |
 | 响应式 | — | Wide 三栏；Medium 紧凑导航；Narrow 覆盖层 + 卡片 |

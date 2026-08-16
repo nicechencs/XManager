@@ -34,7 +34,7 @@ pub fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> impl gpu
                 .gap_2()
                 .child(page_heading(
                     "数据洞察",
-                    "统计范围 = 内容库当前已生效筛选；点击直方图、排名或预设会回到内容库。",
+                    "统计范围 = 内容库当前筛选。点击直方图、排名或预设会立刻改筛选并回到内容库。",
                 ))
                 .child(
                     div()
