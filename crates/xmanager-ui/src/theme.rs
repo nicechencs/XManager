@@ -23,6 +23,13 @@ impl ThemeMode {
         }
     }
 
+    pub const fn opposite_label_zh(self) -> &'static str {
+        match self {
+            Self::Light => "深色",
+            Self::Dark => "浅色",
+        }
+    }
+
     const fn from_u8(value: u8) -> Self {
         match value {
             1 => Self::Dark,

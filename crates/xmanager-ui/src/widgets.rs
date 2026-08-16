@@ -2,9 +2,10 @@
 
 use crate::theme;
 use gpui::{
-    div, prelude::*, px, App, ClickEvent, Div, InteractiveElement, SharedString, Stateful,
+    div, prelude::*, px, App, ClickEvent, Div, InteractiveElement, Rgba, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window,
 };
+use xmanager_core::PostKind;
 
 pub fn btn(
     id: impl Into<SharedString>,
@@ -271,4 +272,206 @@ pub fn truncate_text(s: &str, max_chars: usize) -> String {
         out.push('…');
         out
     }
+}
+
+pub fn kind_color(kind: PostKind) -> Rgba {
+    match kind {
+        PostKind::Original => theme::c(theme::SUCCESS),
+        PostKind::Reply => theme::c(theme::ACCENT),
+        PostKind::Retweet => theme::c(theme::WARNING),
+        PostKind::Quote => theme::c(theme::QUOTE),
+    }
+}
+
+pub fn kind_badge(kind: PostKind) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(20.))
+        .px_2()
+        .rounded_md()
+        .bg(theme::c(theme::CHIP))
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(kind_color(kind))
+        .child(kind.label_zh().to_string())
+}
+
+pub fn metric_tile(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .min_w(px(88.))
+        .flex_1()
+        .px_2()
+        .py_2()
+        .rounded_md()
+        .bg(theme::c(theme::BG_ELEVATED))
+        .border_1()
+        .border_color(theme::c(theme::BORDER))
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme::c(theme::TEXT_MUTED))
+                .child(label.into()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(theme::c(theme::TEXT))
+                .child(value.into()),
+        )
+}
+
+pub fn page_heading(title: impl Into<SharedString>, subtitle: impl Into<SharedString>) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_lg()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(theme::c(theme::TEXT))
+                .child(title.into()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(theme::c(theme::TEXT_MUTED))
+                .child(subtitle.into()),
+        )
+}
+
+pub fn removable_chip(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    div()
+        .id(id.into())
+        .flex()
+        .items_center()
+        .gap_1()
+        .h(px(24.))
+        .px_2()
+        .rounded_md()
+        .bg(theme::c(theme::CHIP))
+        .border_1()
+        .border_color(theme::c(theme::BORDER))
+        .text_xs()
+        .text_color(if enabled {
+            theme::c(theme::TEXT)
+        } else {
+            theme::c(theme::DISABLED_TEXT)
+        })
+        .when(enabled, |el| {
+            el.cursor_pointer()
+                .hover(|s| {
+                    s.bg(theme::c(theme::BG_HOVER))
+                        .border_color(theme::c(theme::ACCENT))
+                })
+                .on_click(on_click)
+        })
+        .child(label.into())
+        .child(
+            div()
+                .text_xs()
+                .text_color(theme::c(theme::TEXT_MUTED))
+                .child("×"),
+        )
+}
+
+pub fn count_badge(count: usize) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .min_w(px(20.))
+        .h(px(18.))
+        .px_1()
+        .rounded_md()
+        .bg(if count > 0 {
+            theme::c(theme::CHIP_ACTIVE)
+        } else {
+            theme::c(theme::CHIP)
+        })
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(if count > 0 {
+            theme::c(theme::TEXT)
+        } else {
+            theme::c(theme::TEXT_MUTED)
+        })
+        .child(count.to_string())
+}
+
+pub fn nav_destination(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    compact: bool,
+    active: bool,
+    badge: Option<usize>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id.into())
+        .flex()
+        .when(compact, |el| {
+            el.flex_col()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .py_2()
+                .px_1()
+        })
+        .when(!compact, |el| {
+            el.flex_row()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+        })
+        .w_full()
+        .rounded_md()
+        .cursor_pointer()
+        .bg(if active {
+            theme::c(theme::CHIP_ACTIVE)
+        } else {
+            theme::c(theme::BG_ELEVATED)
+        })
+        .border_1()
+        .border_color(if active {
+            theme::c(theme::ACCENT)
+        } else {
+            theme::c(theme::BORDER)
+        })
+        .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
+        .on_click(on_click)
+        .child(
+            div()
+                .when(active && !compact, |el| {
+                    el.pl_1()
+                        .border_l_2()
+                        .border_color(theme::c(theme::ACCENT))
+                })
+                .text_sm()
+                .font_weight(if active {
+                    gpui::FontWeight::SEMIBOLD
+                } else {
+                    gpui::FontWeight::MEDIUM
+                })
+                .text_color(if active {
+                    theme::c(theme::TEXT)
+                } else {
+                    theme::c(theme::TEXT_MUTED)
+                })
+                .child(label),
+        )
+        .when_some(badge, |el, count| el.child(count_badge(count)))
 }

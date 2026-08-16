@@ -2,9 +2,9 @@
 
 use crate::app::AppState;
 use crate::theme;
-use crate::widgets::{checkbox_mark, truncate_text};
-use gpui::{div, prelude::*, px, uniform_list, Div, SharedString, Window};
-use xmanager_core::{PostKind, Tweet};
+use crate::widgets::{btn, checkbox_mark, kind_color, truncate_text};
+use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window};
+use xmanager_core::{SortField, SortOrder, Tweet};
 
 const COL_CHECK: f32 = 32.0;
 const COL_KIND: f32 = 36.0;
@@ -29,6 +29,43 @@ fn header_cell(label: &str, width: f32) -> Div {
         .child(label.to_string())
 }
 
+fn sort_header(
+    label: &'static str,
+    width: f32,
+    field: SortField,
+    state: &AppState,
+    cx: &mut Context<AppState>,
+) -> impl gpui::IntoElement {
+    let active = state.applied_filter.sort == field;
+    let arrow = if !active {
+        ""
+    } else if state.applied_filter.order == SortOrder::Asc {
+        " ↑"
+    } else {
+        " ↓"
+    };
+    div()
+        .id(SharedString::from(format!("sort-header-{label}")))
+        .w(px(width))
+        .flex_none()
+        .px_1()
+        .text_sm()
+        .font_weight(if active {
+            gpui::FontWeight::SEMIBOLD
+        } else {
+            gpui::FontWeight::MEDIUM
+        })
+        .text_color(if active {
+            theme::c(theme::ACCENT)
+        } else {
+            theme::c(theme::TEXT_MUTED)
+        })
+        .cursor_pointer()
+        .hover(|s| s.text_color(theme::c(theme::TEXT)))
+        .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx)))
+        .child(format!("{label}{arrow}"))
+}
+
 fn cell(text: impl Into<SharedString>, width: f32, muted: bool) -> Div {
     div()
         .w(px(width))
@@ -43,15 +80,6 @@ fn cell(text: impl Into<SharedString>, width: f32, muted: bool) -> Div {
         .overflow_hidden()
         .whitespace_nowrap()
         .child(text.into())
-}
-
-fn kind_color(kind: PostKind) -> gpui::Rgba {
-    match kind {
-        PostKind::Original => theme::c(theme::SUCCESS),
-        PostKind::Reply => theme::c(theme::ACCENT),
-        PostKind::Retweet => theme::c(theme::WARNING),
-        PostKind::Quote => theme::c(theme::QUOTE),
-    }
 }
 
 fn row_bg(focused: bool, selected: bool, ix: usize) -> gpui::Rgba {
@@ -88,7 +116,7 @@ fn labeled_field(label: &str, value: impl Into<SharedString>, color: gpui::Rgba)
         )
 }
 
-fn table_header() -> Div {
+fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
     div()
         .flex()
         .flex_row()
@@ -100,13 +128,13 @@ fn table_header() -> Div {
         .border_color(theme::c(theme::BORDER))
         .child(header_cell("", COL_CHECK))
         .child(header_cell("类型", COL_KIND))
-        .child(header_cell("日期", COL_DATE))
-        .child(header_cell("曝光", COL_VIEWS))
-        .child(header_cell("赞", COL_LIKES))
-        .child(header_cell("藏", COL_BM))
-        .child(header_cell("赞率", COL_LIKE_R))
-        .child(header_cell("藏率", COL_BM_R))
-        .child(header_cell("互率", COL_ENG_R))
+        .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
+        .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
+        .child(sort_header("赞", COL_LIKES, SortField::LikeRate, state, cx))
+        .child(sort_header("藏", COL_BM, SortField::BookmarkRate, state, cx))
+        .child(sort_header("赞率", COL_LIKE_R, SortField::LikeRate, state, cx))
+        .child(sort_header("藏率", COL_BM_R, SortField::BookmarkRate, state, cx))
+        .child(sort_header("互率", COL_ENG_R, SortField::EngagementRate, state, cx))
         .child(
             div()
                 .flex_1()
@@ -203,36 +231,39 @@ fn first_load_skeleton(title: &'static str, detail: &'static str) -> Div {
         .children((0..8).map(skeleton_row))
 }
 
-fn empty_state(state: &AppState) -> Div {
+fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
     let first_load = state.loading && state.all_tweets.is_empty();
     let (title, detail) = if first_load {
         ("正在拉取…", "首次同步完成后会显示结果。")
     } else if !state.credentials_ok {
         (
             "尚未配置凭证",
-            "请在项目根目录配置 .env（X_API_KEY 等），然后点击侧栏「刷新状态」。",
+            "请在项目根目录配置 .env（X_API_KEY 等），然后点击「刷新状态」。",
         )
     } else if state.all_tweets.is_empty() {
         (
             "暂无数据",
-            "点击右上角「拉取并分析」同步你的推文。旧数据会在刷新时保留到完成。",
+            "先拉取你的推文，再按曝光、类型或时间筛选。刷新时会保留当前列表。",
         )
     } else {
         (
             "没有匹配结果",
-            "当前筛选条件下为空。可移除工具栏条件标签，或打开筛选抽屉调整。",
+            "当前筛选条件下为空。可清除条件，或打开筛选抽屉继续收窄。",
         )
     };
     if first_load {
         return first_load_skeleton(title, detail);
     }
+    let no_creds = !state.credentials_ok;
+    let no_data = state.credentials_ok && state.all_tweets.is_empty();
+    let no_match = !state.all_tweets.is_empty();
     div()
         .flex()
         .flex_col()
         .flex_1()
         .items_center()
         .justify_center()
-        .gap_2()
+        .gap_3()
         .px_6()
         .child(
             div()
@@ -247,6 +278,51 @@ fn empty_state(state: &AppState) -> Div {
                 .text_sm()
                 .text_color(theme::c(theme::TEXT_MUTED))
                 .child(detail),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap_2()
+                .when(no_creds, |el| {
+                    el.child(btn(
+                        "empty-refresh",
+                        "刷新状态",
+                        true,
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
+                    ))
+                })
+                .when(no_data, |el| {
+                    el.child(btn(
+                        "empty-fetch",
+                        "拉取并分析",
+                        true,
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| this.fetch_tweets(cx)),
+                    ))
+                })
+                .when(no_match, |el| {
+                    el.child(btn(
+                        "empty-clear-filters",
+                        "清除筛选",
+                        true,
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| {
+                            this.filter_draft = crate::app::FilterDraft::unrestricted();
+                            this.apply_filters(cx);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(btn(
+                        "empty-open-filters",
+                        "打开筛选",
+                        false,
+                        true,
+                        cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
+                    ))
+                }),
         )
 }
 
@@ -441,9 +517,9 @@ pub fn render_tweet_list(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_1()
         .min_h(px(0.))
         .bg(theme::c(theme::BG))
-        .when(!as_cards, |el| el.child(table_header()))
+        .when(!as_cards, |el| el.child(table_header(state, cx)))
         .child(if count == 0 {
-            empty_state(state).into_any_element()
+            empty_state(state, cx).into_any_element()
         } else {
             uniform_list(
                 "tweet-list",

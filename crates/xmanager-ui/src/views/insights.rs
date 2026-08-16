@@ -2,9 +2,9 @@
 
 use crate::app::{AppState, ExportFormat, Route};
 use crate::theme;
-use crate::widgets::{btn, section_label, truncate_text};
+use crate::widgets::{btn, kind_color, page_heading, section_label, truncate_text};
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
-use xmanager_core::{PostKind, SortField, SortOrder, TimeRange, Tweet};
+use xmanager_core::{SortField, SortOrder, TimeRange, Tweet};
 
 use super::stats_panel;
 
@@ -13,32 +13,34 @@ const COL_KIND: f32 = 36.0;
 const COL_VIEWS: f32 = 64.0;
 const COL_METRIC: f32 = 80.0;
 
-pub fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> Div {
+pub fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::IntoElement {
     let can_export = !state.loading && !state.filtered.is_empty();
     div()
+        .id("insights-page")
         .flex()
         .flex_col()
         .flex_1()
         .min_h(px(0.))
+        .overflow_y_scroll()
         .p_4()
         .gap_3()
         .child(
             div()
                 .flex()
                 .flex_row()
+                .flex_wrap()
                 .items_center()
                 .justify_between()
                 .gap_2()
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child("数据洞察"),
-                )
+                .child(page_heading(
+                    "数据洞察",
+                    "统计范围 = 内容库当前已生效筛选；点击直方图、排名或预设会回到内容库。",
+                ))
                 .child(
                     div()
                         .flex()
                         .flex_row()
+                        .flex_wrap()
                         .gap_2()
                         .child(btn(
                             "insights-export-csv",
@@ -59,12 +61,6 @@ pub fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> Div {
                             }),
                         )),
                 ),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child("统计范围 = 内容库当前已生效筛选；点击直方图、排名或预设会回到内容库。"),
         )
         .child(stats_panel::render_stats_panel(state, cx))
         .child(render_rank_list(state, cx))
@@ -300,15 +296,6 @@ fn rank_metric_value(tweet: &Tweet, sort: SortField) -> String {
         SortField::ReplyRate => Tweet::format_rate(tweet.reply_rate()),
         SortField::Engagement => format!("{}", tweet.engagement()),
         SortField::Date => tweet.display_date(),
-    }
-}
-
-fn kind_color(kind: PostKind) -> gpui::Rgba {
-    match kind {
-        PostKind::Original => theme::c(theme::SUCCESS),
-        PostKind::Reply => theme::c(theme::ACCENT),
-        PostKind::Retweet => theme::c(theme::WARNING),
-        PostKind::Quote => theme::c(theme::QUOTE),
     }
 }
 
