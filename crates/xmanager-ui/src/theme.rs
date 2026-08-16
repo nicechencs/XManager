@@ -1,8 +1,105 @@
-//! Runtime light/dark theme colors for XManager.
+//! Runtime light/dark theme, type scale, and spacing tokens for XManager.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use gpui::{rgb, Rgba};
+use gpui::{px, rgb, FontWeight, SharedString, Styled, Rgba};
+
+/// Cross-platform UI sans. GPUI takes one family; CJK coverage depends on the OS.
+pub fn ui_font_family() -> SharedString {
+    SharedString::from(if cfg!(target_os = "macos") {
+        ".AppleSystemUIFont"
+    } else if cfg!(target_os = "windows") {
+        "Segoe UI"
+    } else {
+        "Noto Sans CJK SC"
+    })
+}
+
+/// Monospace for tweet IDs and typed confirm tokens.
+pub fn mono_font_family() -> SharedString {
+    SharedString::from(if cfg!(target_os = "macos") {
+        "Menlo"
+    } else if cfg!(target_os = "windows") {
+        "Consolas"
+    } else {
+        "DejaVu Sans Mono"
+    })
+}
+
+/// Type scale in CSS pixels. Line height is ~1.45× size so CJK and Latin stay readable.
+pub mod type_scale {
+    pub const CAPTION: f32 = 12.0;
+    pub const CAPTION_LINE: f32 = 18.0;
+    pub const BODY: f32 = 13.0;
+    pub const BODY_LINE: f32 = 20.0;
+    pub const TITLE: f32 = 16.0;
+    pub const TITLE_LINE: f32 = 24.0;
+    pub const DISPLAY: f32 = 20.0;
+    pub const DISPLAY_LINE: f32 = 28.0;
+    /// Letter-spacing in px. Titles are slightly tight; captions are slightly open.
+    pub const TRACKING_TIGHT: f32 = -0.2;
+    pub const TRACKING_NORMAL: f32 = 0.0;
+    pub const TRACKING_OPEN: f32 = 0.2;
+}
+
+/// 4px rhythm used by padding, gaps, and control heights.
+pub mod space {
+    pub const XS: f32 = 4.0;
+    pub const SM: f32 = 8.0;
+    pub const MD: f32 = 12.0;
+    pub const LG: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+}
+
+pub mod radius {
+    pub const SM: f32 = 4.0;
+    pub const MD: f32 = 6.0;
+}
+
+pub mod control {
+    pub const HEIGHT: f32 = 32.0;
+    pub const CHIP_HEIGHT: f32 = 28.0;
+    pub const ICON: f32 = 24.0;
+}
+
+pub fn type_caption<E: Styled>(el: E) -> E {
+    el.text_size(px(type_scale::CAPTION))
+        .line_height(px(type_scale::CAPTION_LINE))
+        .font_weight(FontWeight::NORMAL)
+}
+
+pub fn type_body<E: Styled>(el: E) -> E {
+    el.text_size(px(type_scale::BODY))
+        .line_height(px(type_scale::BODY_LINE))
+        .font_weight(FontWeight::NORMAL)
+}
+
+pub fn type_label<E: Styled>(el: E) -> E {
+    el.text_size(px(type_scale::BODY))
+        .line_height(px(type_scale::BODY_LINE))
+        .font_weight(FontWeight::MEDIUM)
+}
+
+pub fn type_title<E: Styled>(el: E) -> E {
+    el.text_size(px(type_scale::TITLE))
+        .line_height(px(type_scale::TITLE_LINE))
+        .font_weight(FontWeight::SEMIBOLD)
+}
+
+pub fn type_display<E: Styled>(el: E) -> E {
+    el.text_size(px(type_scale::DISPLAY))
+        .line_height(px(type_scale::DISPLAY_LINE))
+        .font_weight(FontWeight::BOLD)
+}
+
+pub fn type_mono<E: Styled>(el: E) -> E {
+    type_caption(el).font_family(mono_font_family())
+}
+
+/// Root window defaults: UI font, body size, and readable line height.
+pub fn apply_root_type<E: Styled>(el: E) -> E {
+    type_body(el).font_family(ui_font_family())
+}
 
 /// The active application appearance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -189,6 +286,21 @@ mod tests {
         let foreground = relative_luminance(foreground);
         let background = relative_luminance(background);
         (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
+    }
+
+    #[test]
+    fn type_scale_keeps_line_height_above_size() {
+        assert!(type_scale::CAPTION_LINE > type_scale::CAPTION);
+        assert!(type_scale::BODY_LINE > type_scale::BODY);
+        assert!(type_scale::TITLE_LINE > type_scale::TITLE);
+        assert!(type_scale::DISPLAY_LINE > type_scale::DISPLAY);
+        assert_eq!(space::SM, space::XS * 2.0);
+        assert_eq!(space::MD, space::XS * 3.0);
+        assert_eq!(space::LG, space::XS * 4.0);
+        assert_eq!(control::HEIGHT, space::XL + space::SM);
+        assert!(type_scale::TRACKING_TIGHT < type_scale::TRACKING_NORMAL);
+        assert!(type_scale::TRACKING_OPEN > type_scale::TRACKING_NORMAL);
+        let _ = (ui_font_family(), mono_font_family());
     }
 
     #[test]

@@ -49,7 +49,7 @@ pub fn render_status_bar(state: &AppState) -> Div {
                 .text_xs()
                 .text_color(theme::c(theme::TEXT_MUTED))
                 .child(format!(
-                    "布局 {} · J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页",
+                    "布局 {} · J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页 · Esc 关闭",
                     state.layout_mode.label_zh()
                 )),
         )

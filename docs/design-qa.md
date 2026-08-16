@@ -41,10 +41,20 @@ No actionable P0, P1, or P2 visual or interaction findings remain.
 
 P3 follow-up polish:
 
-- Native typography and spacing are more compact than the generated concept.
+- Native typography and spacing now follow `docs/DESIGN.md` (12/13/16/20 type scale, 4px rhythm). Remaining difference vs the generated concept is density, not missing hierarchy.
 - The implementation uses labeled navigation controls without the concept's decorative icon set; labels remain unambiguous.
 - A populated data-state screenshot should be recaptured when valid OAuth credentials are available.
 - Narrow-window adaptations can be refined in a later desktop-responsiveness pass; the selected desktop target is complete.
+
+## 2026-08-16 interaction pass
+
+Addressed first-run friction without changing the safety state machine:
+
+- Filters apply immediately; fetch limit / include-retweets are labeled as next-fetch-only.
+- Staging candidates keeps the user on 内容库 and shows a banner.
+- Cleanup exposes one primary destructive action; backup/preview extras are optional.
+- Preview/delete summaries prefer tweet excerpts over raw IDs.
+- Shortcut hints are repeated in the sidebar, empty inspector, and status bar.
 
 ## Final verification
 

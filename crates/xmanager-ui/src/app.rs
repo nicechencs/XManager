@@ -301,12 +301,16 @@ pub fn applied_filter_chips(filter: &FilterOptions) -> Vec<AppliedFilterChip> {
     if let Some(n) = filter.top_n {
         chips.push(AppliedFilterChip::TopN(n));
     }
-    // Always surface the active sort metric so rank presets remain inspectable.
-    chips.push(AppliedFilterChip::Sort(filter.sort.label_zh().to_string()));
-    chips.push(AppliedFilterChip::Order(match filter.order {
-        SortOrder::Asc => "最低优先".into(),
-        SortOrder::Desc => "最高优先".into(),
-    }));
+    // Default scope is 曝光 + 最低优先 + 全部类型; only show chips that change results.
+    if filter.sort != SortField::Views {
+        chips.push(AppliedFilterChip::Sort(filter.sort.label_zh().to_string()));
+    }
+    if filter.order != SortOrder::Asc || filter.sort != SortField::Views {
+        chips.push(AppliedFilterChip::Order(match filter.order {
+            SortOrder::Asc => "最低优先".into(),
+            SortOrder::Desc => "最高优先".into(),
+        }));
+    }
 
     let kinds = filter.kinds;
     let kind_labels: Vec<&str> = [
@@ -318,15 +322,40 @@ pub fn applied_filter_chips(filter: &FilterOptions) -> Vec<AppliedFilterChip> {
     .into_iter()
     .filter_map(|(on, label)| on.then_some(label))
     .collect();
-    let kind_chip = if kind_labels.is_empty() {
-        "类型：无".into()
-    } else if kind_labels.len() == 4 {
-        "类型：全部".into()
-    } else {
-        format!("类型：{}", kind_labels.join("/"))
-    };
-    chips.push(AppliedFilterChip::Kinds(kind_chip));
+    if kind_labels.len() != 4 {
+        let kind_chip = if kind_labels.is_empty() {
+            "类型：无".into()
+        } else {
+            format!("类型：{}", kind_labels.join("/"))
+        };
+        chips.push(AppliedFilterChip::Kinds(kind_chip));
+    }
     chips
+}
+
+/// Human-readable candidate line: tweet excerpt first, id second.
+pub fn tweet_preview_label(
+    id: &str,
+    snapshot: &HashMap<String, Tweet>,
+    all_tweets: &[Tweet],
+) -> String {
+    let text = snapshot
+        .get(id)
+        .map(|t| t.text.as_str())
+        .or_else(|| all_tweets.iter().find(|t| t.id == id).map(|t| t.text.as_str()));
+    match text {
+        Some(raw) => {
+            let excerpt = raw.replace('\n', " ");
+            let excerpt: String = excerpt.chars().take(36).collect();
+            let ellipsis = if raw.chars().count() > 36 { "…" } else { "" };
+            format!("{excerpt}{ellipsis}")
+        }
+        None => id.to_string(),
+    }
+}
+
+pub fn cleanup_staging_notice(count: usize) -> String {
+    format!("已加入安全清理（{count} 条）。可继续勾选，或前往安全清理。")
 }
 
 pub fn chip_label(chip: &AppliedFilterChip) -> String {
@@ -435,7 +464,7 @@ pub fn cleanup_next_hint(
     confirm: Option<&DeleteConfirm>,
 ) -> String {
     if candidate_count == 0 {
-        return "在内容库勾选推文（左侧方框），或点开一条后点「加入安全清理」。".into();
+        return "先回内容库勾选或打开一条，再点「加入安全清理」。加入后仍留在内容库，方便继续挑选。".into();
     }
     if !credentials_ok {
         return "已有候选，但缺少有效 OAuth 凭证，无法真实删除。".into();
@@ -447,9 +476,9 @@ pub fn cleanup_next_hint(
         return "请选择「确认数量」或「DELETE」，然后点「确认并删除」。".into();
     }
     if has_backup && has_preview {
-        return "备份和预演已就绪。点「真实删除」，再选择确认方式。".into();
+        return "备份和预演已自动完成。点「真实删除」进入二次确认即可。".into();
     }
-    "点「真实删除」会自动备份、预演，然后请你二次确认。".into()
+    "只需点「真实删除」：会自动备份并预演，再请你二次确认。下面的备份/预演是可选的。".into()
 }
 
 /// Refresh only the cached content that the bounded API response actually includes.
@@ -613,6 +642,10 @@ pub struct AppState {
     /// User-resized inspector column; leftover width is the tweet list.
     pub inspector_width_px: f32,
     pub split_drag: Option<SplitDrag>,
+    /// Library banner after staging candidates without leaving the page.
+    pub cleanup_notice: Option<SharedString>,
+    /// First click arms「清空」; second click actually clears.
+    pub clear_cleanup_armed: bool,
 }
 
 impl AppState {
@@ -696,6 +729,8 @@ impl AppState {
             library_scroll: UniformListScrollHandle::default(),
             inspector_width_px: LayoutMode::Wide.inspector_width(),
             split_drag: None,
+            cleanup_notice: None,
+            clear_cleanup_armed: false,
         }
     }
 
@@ -737,6 +772,7 @@ impl AppState {
     }
 
     /// True when the drawer draft differs from the currently applied filter.
+    #[allow(dead_code)]
     pub fn filter_draft_is_dirty(&self) -> bool {
         self.filter_draft.to_filter_options() != self.applied_filter
     }
@@ -794,6 +830,14 @@ impl AppState {
 
     pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
         self.active_route = route;
+        if route == Route::Cleanup {
+            self.cleanup_notice = None;
+        }
+        cx.notify();
+    }
+
+    pub fn dismiss_cleanup_notice(&mut self, cx: &mut Context<Self>) {
+        self.cleanup_notice = None;
         cx.notify();
     }
 
@@ -976,10 +1020,10 @@ impl AppState {
                 self.cleanup_snapshot.insert(id.to_owned(), tweet.clone());
             }
             self.invalidate_cleanup_receipts();
-            self.status_msg = SharedString::from(format!(
-                "已加入安全清理候选（{} 条）",
-                self.cleanup_candidates.len()
-            ));
+            self.status_msg = SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len()));
+            self.cleanup_notice =
+                Some(SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len())));
+            self.clear_cleanup_armed = false;
         }
         cx.notify();
     }
@@ -996,11 +1040,25 @@ impl AppState {
             {
                 self.focused_tweet_id = None;
             }
+            self.clear_cleanup_armed = false;
             self.status_msg = SharedString::from(format!(
                 "已移除候选（{} 条）",
                 self.cleanup_candidates.len()
             ));
         }
+        cx.notify();
+    }
+
+    pub fn request_clear_cleanup(&mut self, cx: &mut Context<Self>) {
+        if self.loading || self.cleanup_candidates.is_empty() {
+            return;
+        }
+        if self.clear_cleanup_armed {
+            self.clear_cleanup_candidates(cx);
+            return;
+        }
+        self.clear_cleanup_armed = true;
+        self.status_msg = SharedString::from("再点一次「确认清空」才会移除全部候选");
         cx.notify();
     }
 
@@ -1011,6 +1069,8 @@ impl AppState {
         self.cleanup_candidates.clear();
         self.cleanup_snapshot.clear();
         self.invalidate_cleanup_receipts();
+        self.clear_cleanup_armed = false;
+        self.cleanup_notice = None;
         self.status_msg = SharedString::from("已清空安全清理候选");
         cx.notify();
     }
@@ -1036,11 +1096,11 @@ impl AppState {
         if self.cleanup_candidates.len() != before {
             self.invalidate_cleanup_receipts();
         }
-        self.status_msg = SharedString::from(format!(
-            "安全清理候选：{} 条。点「真实删除」即可备份、预演并确认。",
-            self.cleanup_candidates.len()
-        ));
-        self.active_route = Route::Cleanup;
+        self.clear_cleanup_armed = false;
+        self.cleanup_notice = Some(SharedString::from(cleanup_staging_notice(
+            self.cleanup_candidates.len(),
+        )));
+        self.status_msg = SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len()));
         cx.notify();
     }
 
@@ -1969,11 +2029,11 @@ impl AppState {
 mod tests {
     use super::{
         applied_filter_chips, chip_label, classify_preview, cleanup_next_hint,
-        clamp_inspector_width, delete_confirm_ready, ids_for_cleanup_staging, next_sort_from_header,
-        preview_from_lookup, receipt_matches, refresh_candidate_snapshot, resolve_focused_tweet,
-        workspace_shortcut, AppliedFilterChip, DeleteConfirm, DeleteConfirmToken, DeleteOutcome,
-        FilterDraft, INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN, LayoutMode, Receipt,
-        WorkspaceShortcut,
+        cleanup_staging_notice, clamp_inspector_width, delete_confirm_ready,
+        ids_for_cleanup_staging, next_sort_from_header, preview_from_lookup, receipt_matches,
+        refresh_candidate_snapshot, resolve_focused_tweet, tweet_preview_label, workspace_shortcut,
+        AppliedFilterChip, DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft,
+        INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN, LayoutMode, Receipt, WorkspaceShortcut,
     };
     use std::collections::{HashMap, HashSet};
     use xmanager_core::{
@@ -2051,7 +2111,7 @@ mod tests {
     #[test]
     fn cleanup_hint_unlocks_delete_after_staging() {
         let empty = cleanup_next_hint(0, true, false, false, None);
-        assert!(empty.contains("勾选"));
+        assert!(empty.contains("内容库"));
         let staged = cleanup_next_hint(2, true, false, false, None);
         assert!(staged.contains("真实删除"));
         let confirm = DeleteConfirm {
@@ -2132,6 +2192,54 @@ mod tests {
         assert!(open.kinds.retweet);
         assert!(open.time_range == TimeRange::All);
         assert!(open.top_n.is_none());
+    }
+
+    #[test]
+    fn default_scope_omits_sort_order_and_all_kinds_chips() {
+        let filter = FilterOptions {
+            max_views: None,
+            min_views: None,
+            max_engagement: None,
+            older_than_days: None,
+            newer_than_days: None,
+            time_range: TimeRange::All,
+            kinds: KindFilter::all(),
+            include_replies: true,
+            sort: SortField::Views,
+            order: SortOrder::Asc,
+            top_n: None,
+        };
+        let chips = applied_filter_chips(&filter);
+        assert!(chips.is_empty(), "{chips:?}");
+    }
+
+    #[test]
+    fn cleanup_staging_notice_stays_on_library() {
+        let notice = cleanup_staging_notice(3);
+        assert!(notice.contains("3 条"));
+        assert!(notice.contains("继续勾选"));
+        assert!(!notice.contains("已跳转"));
+    }
+
+    #[test]
+    fn tweet_preview_label_prefers_excerpt_over_raw_id() {
+        let snapshot = HashMap::from([(
+            "abc".to_owned(),
+            Tweet {
+                id: "abc".into(),
+                text: "一条很长的推文正文用来确认预演结果不再只显示 ID".into(),
+                created_at: None,
+                public_metrics: PublicMetrics::default(),
+                conversation_id: None,
+                in_reply_to_user_id: None,
+                is_retweet: false,
+                is_quote: false,
+            },
+        )]);
+        let label = tweet_preview_label("abc", &snapshot, &[]);
+        assert!(label.contains("一条很长"));
+        assert!(!label.starts_with("abc"));
+        assert_eq!(tweet_preview_label("missing", &snapshot, &[]), "missing");
     }
 
     #[test]
