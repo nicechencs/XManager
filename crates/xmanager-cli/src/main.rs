@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use xmanager_core::logging::{self, events, Outcome, Stream};
 use xmanager_core::{
-    export_auto, filter_tweets, load_tweets_file, parse_tweets_json, summarize, FilterOptions,
-    KindFilter, Settings, SortField, SortOrder, TimeRange, Tweet, XClient,
+    export_auto, filter_tweets, load_tweets_file, parse_tweets_json, summarize, CredentialLayout,
+    FilterOptions, KindFilter, Settings, SortField, SortOrder, TimeRange, Tweet, XClient,
 };
 
 const EXIT_OK: u8 = 0;
@@ -250,20 +250,26 @@ fn run(cli: Cli) -> Result<(), u8> {
 fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
     let settings = load_settings(env_path)?;
     let missing = settings.missing_oauth1();
+    let layout = settings.credential_layout();
     let payload = json!({
         "command": "creds",
-        "oauth1": missing.is_empty(),
+        "oauth1": missing.is_empty() && layout != CredentialLayout::Swapped,
         "missing": missing,
+        "layout": layout.as_str(),
+        "hint": layout.user_facing(),
         "has_bearer": !settings.bearer_token.is_empty(),
     });
     let presence = settings.credential_presence();
     logging::info(Stream::App, events::APP_CONFIG)
-        .outcome(if missing.is_empty() {
-            Outcome::Ok
-        } else {
-            Outcome::Error
-        })
+        .outcome(
+            if missing.is_empty() && layout != CredentialLayout::Swapped {
+                Outcome::Ok
+            } else {
+                Outcome::Error
+            },
+        )
         .field("oauth1", missing.is_empty())
+        .field("layout", layout.as_str())
         .field("has_api_key", presence.api_key)
         .field("has_api_secret", presence.api_secret)
         .field("has_access_token", presence.access_token)
@@ -271,10 +277,10 @@ fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
         .field("has_bearer", presence.bearer_token)
         .field("binary", "xmanager-cli")
         .emit();
-    if missing.is_empty() {
-        emit_ok(payload)
-    } else {
-        emit_err(EXIT_CREDS, "missing_credentials", payload)
+    match layout {
+        CredentialLayout::Swapped => emit_err(EXIT_CREDS, "swapped_credentials", payload),
+        CredentialLayout::Missing => emit_err(EXIT_CREDS, "missing_credentials", payload),
+        CredentialLayout::Ready | CredentialLayout::AccessTokenShapeMissing => emit_ok(payload),
     }
 }
 
@@ -382,13 +388,23 @@ fn cmd_delete(
 fn api_client(env_path: Option<&Path>) -> Result<XClient, u8> {
     let settings = load_settings(env_path)?;
     if let Err(e) = settings.require_oauth1() {
+        let layout = settings.credential_layout();
+        let code = match layout {
+            CredentialLayout::Swapped => "swapped_credentials",
+            _ => "missing_credentials",
+        };
         return Err(fail(
             EXIT_CREDS,
-            "missing_credentials",
-            json!({ "error": e.to_string(), "missing": settings.missing_oauth1() }),
+            code,
+            json!({
+                "error": e.user_facing(),
+                "layout": layout.as_str(),
+                "missing": settings.missing_oauth1()
+            }),
         ));
     }
-    XClient::new(settings).map_err(|e| fail(EXIT_ERROR, "client", json!({ "error": e.to_string() })))
+    XClient::new(settings)
+        .map_err(|e| fail(EXIT_ERROR, "client", json!({ "error": e.user_facing() })))
 }
 
 fn load_settings(env_path: Option<&Path>) -> Result<Settings, u8> {
@@ -514,9 +530,8 @@ fn fail(exit: u8, code: &str, mut payload: Value) -> u8 {
     }
     println!(
         "{}",
-        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| format!(
-            "{{\"ok\":false,\"code\":\"{code}\"}}"
-        ))
+        serde_json::to_string_pretty(&payload)
+            .unwrap_or_else(|_| format!("{{\"ok\":false,\"code\":\"{code}\"}}"))
     );
     exit
 }
@@ -527,19 +542,28 @@ fn api_fail(e: xmanager_core::Error) -> Result<(), u8> {
         Error::MissingCredentials(_) => Err(fail(
             EXIT_CREDS,
             "missing_credentials",
-            json!({ "error": e.to_string() }),
+            json!({ "error": e.user_facing() }),
+        )),
+        Error::CredentialMisplaced(_) => Err(fail(
+            EXIT_CREDS,
+            "swapped_credentials",
+            json!({ "error": e.user_facing() }),
         )),
         Error::RateLimited { retry_after_secs } => Err(fail(
             EXIT_API,
             "rate_limited",
             json!({
-                "error": e.to_string(),
+                "error": e.user_facing(),
                 "retry_after_secs": retry_after_secs
             }),
         )),
         Error::Api { .. } | Error::Network(_) => {
-            Err(fail(EXIT_API, "api", json!({ "error": e.to_string() })))
+            Err(fail(EXIT_API, "api", json!({ "error": e.user_facing() })))
         }
-        _ => Err(fail(EXIT_ERROR, "error", json!({ "error": e.to_string() }))),
+        _ => Err(fail(
+            EXIT_ERROR,
+            "error",
+            json!({ "error": e.user_facing() }),
+        )),
     }
 }

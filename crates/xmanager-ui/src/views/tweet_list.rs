@@ -1,8 +1,8 @@
 //! Virtualized tweet list with checkbox selection, kind & rates.
 
-use crate::app::AppState;
+use crate::app::{chip_label, library_empty_copy, AppState, LibraryEmptyKind};
 use crate::theme;
-use crate::widgets::{btn, checkbox_mark, kind_color, truncate_text};
+use crate::widgets::{btn, checkbox_mark, kind_color, removable_chip, truncate_text};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window};
 use xmanager_core::{SortField, SortOrder, Tweet};
 
@@ -131,10 +131,34 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
         .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
         .child(sort_header("赞", COL_LIKES, SortField::LikeRate, state, cx))
-        .child(sort_header("藏", COL_BM, SortField::BookmarkRate, state, cx))
-        .child(sort_header("赞率", COL_LIKE_R, SortField::LikeRate, state, cx))
-        .child(sort_header("藏率", COL_BM_R, SortField::BookmarkRate, state, cx))
-        .child(sort_header("互率", COL_ENG_R, SortField::EngagementRate, state, cx))
+        .child(sort_header(
+            "藏",
+            COL_BM,
+            SortField::BookmarkRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "赞率",
+            COL_LIKE_R,
+            SortField::LikeRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "藏率",
+            COL_BM_R,
+            SortField::BookmarkRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "互率",
+            COL_ENG_R,
+            SortField::EngagementRate,
+            state,
+            cx,
+        ))
         .child(
             div()
                 .flex_1()
@@ -232,31 +256,51 @@ fn first_load_skeleton(title: &'static str, detail: &'static str) -> Div {
 }
 
 fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let first_load = state.loading && state.all_tweets.is_empty();
-    let (title, detail) = if first_load {
-        ("正在拉取…", "首次同步完成后会显示结果。")
-    } else if !state.credentials_ok {
-        (
-            "尚未配置凭证",
-            "请在项目根目录配置 .env（X_API_KEY 等），然后点击「刷新状态」。",
-        )
-    } else if state.all_tweets.is_empty() {
-        (
-            "暂无数据",
-            "先拉取你的推文，再按曝光、类型或时间筛选。刷新时会保留当前列表。",
-        )
-    } else {
-        (
-            "没有匹配结果",
-            "当前筛选条件下为空。可清除条件，或打开筛选抽屉继续收窄。",
-        )
-    };
-    if first_load {
-        return first_load_skeleton(title, detail);
+    let copy = library_empty_copy(
+        state.loading,
+        state.all_tweets.len(),
+        state.filtered.len(),
+        state.last_synced_at.is_some(),
+        state.last_fetch_failed,
+        state.credential_layout,
+    );
+    if copy.kind == LibraryEmptyKind::Loading {
+        return first_load_skeleton("正在拉取…", "首次同步完成后会显示结果。");
     }
-    let no_creds = !state.credentials_ok;
-    let no_data = state.credentials_ok && state.all_tweets.is_empty();
-    let no_match = !state.all_tweets.is_empty();
+    let need_refresh = matches!(
+        copy.kind,
+        LibraryEmptyKind::CredentialsMissing | LibraryEmptyKind::CredentialsSwapped
+    );
+    let need_fetch = matches!(
+        copy.kind,
+        LibraryEmptyKind::NeverSynced
+            | LibraryEmptyKind::FetchFailed
+            | LibraryEmptyKind::AccountEmpty
+    );
+    let no_match = copy.kind == LibraryEmptyKind::FilteredEmpty;
+    let enabled = !state.loading;
+    let chip_els: Vec<_> = if no_match {
+        state
+            .applied_chips()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, chip)| {
+                let label = chip_label(&chip);
+                removable_chip(
+                    format!("empty-chip-{idx}"),
+                    label,
+                    enabled,
+                    cx.listener(move |this, _, _window, cx| {
+                        this.remove_applied_chip(chip.clone(), cx);
+                    }),
+                )
+                .into_any_element()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let has_chips = !chip_els.is_empty();
     div()
         .flex()
         .flex_col()
@@ -270,22 +314,33 @@ fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .text_sm()
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(theme::c(theme::TEXT))
-                .child(title),
+                .child(copy.title),
         )
         .child(
             div()
-                .max_w(px(420.))
+                .max_w(px(460.))
                 .text_sm()
                 .text_color(theme::c(theme::TEXT_MUTED))
-                .child(detail),
+                .child(copy.detail),
         )
+        .when(has_chips, |el| {
+            el.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .justify_center()
+                    .gap_1()
+                    .children(chip_els),
+            )
+        })
         .child(
             div()
                 .flex()
                 .flex_row()
                 .flex_wrap()
                 .gap_2()
-                .when(no_creds, |el| {
+                .when(need_refresh, |el| {
                     el.child(btn(
                         "empty-refresh",
                         "刷新状态",
@@ -294,7 +349,7 @@ fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
                     ))
                 })
-                .when(no_data, |el| {
+                .when(need_fetch, |el| {
                     el.child(btn(
                         "empty-fetch",
                         "拉取并分析",

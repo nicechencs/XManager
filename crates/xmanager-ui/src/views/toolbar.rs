@@ -1,6 +1,8 @@
 //! Library page toolbar and the transient selection bar.
 
-use crate::app::{chip_label, AppState, AppliedFilterChip, ExportFormat, Route};
+use crate::app::{
+    chip_label, is_default_cleanup_preset, AppState, AppliedFilterChip, ExportFormat, Route,
+};
 use crate::theme;
 use crate::widgets::{btn, removable_chip, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
@@ -19,7 +21,8 @@ pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Op
             .border_b_1()
             .border_color(theme::c(theme::ACCENT))
             .child(
-                theme::type_body(div().flex_1().text_color(theme::c(theme::TEXT))).child(msg.clone()),
+                theme::type_body(div().flex_1().text_color(theme::c(theme::TEXT)))
+                    .child(msg.clone()),
             )
             .child(btn(
                 "notice-go-cleanup",
@@ -165,42 +168,80 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         )),
                 ),
         )
-        .child(div().flex().flex_row().flex_wrap().items_center().gap_2().children([
-            toggle_chip(
-                "filter-drawer-toggle",
-                {
-                    let n = state.applied_chips().len();
-                    if state.filter_drawer_open {
-                        format!("收起筛选 · {n}")
-                    } else {
-                        format!("筛选 · {n}")
-                    }
-                },
-                state.filter_drawer_open,
-                cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
-            ),
-            toggle_chip(
-                "sort-summary",
-                format!("排序：{}", state.applied_filter.sort.label_zh()),
-                false,
-                cx.listener(|this, _, _window, cx| {
-                    this.filter_drawer_open = true;
-                    cx.notify();
-                }),
-            ),
-        ]))
-        .child(div().flex().flex_row().flex_wrap().gap_1().children({
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .children([
+                    toggle_chip(
+                        "filter-drawer-toggle",
+                        {
+                            let n = state.applied_chips().len();
+                            if state.filter_drawer_open {
+                                format!("收起筛选 · {n}")
+                            } else {
+                                format!("筛选 · {n}")
+                            }
+                        },
+                        state.filter_drawer_open,
+                        cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
+                    ),
+                    toggle_chip(
+                        "sort-summary",
+                        format!("排序：{}", state.applied_filter.sort.label_zh()),
+                        false,
+                        cx.listener(|this, _, _window, cx| {
+                            this.filter_drawer_open = true;
+                            cx.notify();
+                        }),
+                    ),
+                ]),
+        )
+        .child({
             let enabled = !state.loading;
-            state
+            let chips: Vec<_> = state
                 .applied_chips()
                 .into_iter()
                 .enumerate()
-                .map(move |(idx, chip)| {
+                .map(|(idx, chip)| {
                     let label = chip_label(&chip);
                     applied_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx)
                         .into_any_element()
                 })
-        }))
+                .collect();
+            let has_chips = !chips.is_empty();
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .children(chips)
+                .when(has_chips, |el| {
+                    el.child(btn(
+                        "toolbar-clear-filters",
+                        "清除全部",
+                        false,
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| {
+                            this.filter_draft = crate::app::FilterDraft::unrestricted();
+                            this.apply_filters(cx);
+                            cx.notify();
+                        }),
+                    ))
+                })
+        })
+        .when(is_default_cleanup_preset(&state.applied_filter), |el| {
+            el.child(
+                div()
+                    .text_xs()
+                    .text_color(theme::c(theme::TEXT_DIM))
+                    .child("默认范围：曝光≤50、不含回帖/转发。点芯片即可放宽。"),
+            )
+        })
         .child(
             div()
                 .flex()

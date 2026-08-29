@@ -1,6 +1,6 @@
 //! Bottom status bar.
 
-use crate::app::AppState;
+use crate::app::{credentials_line_healthy, AppState};
 use crate::theme;
 use gpui::{div, prelude::*, px, Div};
 
@@ -56,11 +56,16 @@ pub fn render_status_bar(state: &AppState) -> Div {
         .child(
             div()
                 .text_xs()
-                .text_color(if state.credentials_ok {
-                    theme::c(theme::SUCCESS)
-                } else {
-                    theme::c(theme::WARNING)
-                })
+                .text_color(
+                    if credentials_line_healthy(
+                        state.credential_layout,
+                        state.current_user.is_some(),
+                    ) {
+                        theme::c(theme::SUCCESS)
+                    } else {
+                        theme::c(theme::WARNING)
+                    },
+                )
                 .child(state.credentials_msg.clone()),
         )
 }

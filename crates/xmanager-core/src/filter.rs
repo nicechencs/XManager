@@ -287,16 +287,13 @@ pub fn view_bucket_bounds(label: &str) -> Option<(u64, Option<u64>)> {
 /// Filter tweets by views / rates / age / kind, then sort (and optional top-N).
 pub fn filter_tweets(tweets: &[Tweet], opts: &FilterOptions) -> Vec<Tweet> {
     let now = Utc::now();
-    let older_cutoff = opts
-        .older_than_days
-        .map(|d| now - Duration::days(d as i64));
+    let older_cutoff = opts.older_than_days.map(|d| now - Duration::days(d as i64));
 
     // Time window: time_range takes precedence; fall back to newer_than_days.
     let newer_cutoff = if let Some(hours) = opts.time_range.within_hours() {
         Some(now - Duration::hours(hours as i64))
     } else {
-        opts.newer_than_days
-            .map(|d| now - Duration::days(d as i64))
+        opts.newer_than_days.map(|d| now - Duration::days(d as i64))
     };
 
     let kinds = opts.effective_kinds();
@@ -501,6 +498,7 @@ mod tests {
                 bookmark_count: likes / 2,
                 ..Default::default()
             },
+            non_public_metrics: crate::models::NonPublicMetrics::default(),
             conversation_id: None,
             in_reply_to_user_id: if kind == PostKind::Reply {
                 Some("99".into())

@@ -178,6 +178,7 @@ mod tests {
                 like_count: 1,
                 ..Default::default()
             },
+            non_public_metrics: crate::models::NonPublicMetrics::default(),
             conversation_id: None,
             in_reply_to_user_id: None,
             is_retweet: false,

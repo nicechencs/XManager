@@ -82,7 +82,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
         )
         .child(
             theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
-                .child("改条件后列表立即更新。拉取数量只影响下次「拉取并分析」。"),
+                .child("默认先看曝光≤50 的原创/引用，方便找低曝光内容。点芯片或「清除筛选」可看全部。改条件后列表立即更新。"),
         )
         .child(section_label("时间范围"))
         .child(div().flex().flex_row().flex_wrap().gap_1().children(
@@ -679,7 +679,10 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             el.child(
                 div()
                     .text_xs()
-                    .text_color(if state.credentials_ok {
+                    .text_color(if crate::app::credentials_line_healthy(
+                        state.credential_layout,
+                        state.current_user.is_some(),
+                    ) {
                         theme::c(theme::SUCCESS)
                     } else {
                         theme::c(theme::WARNING)

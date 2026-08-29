@@ -56,23 +56,26 @@ XManager/
 cp .env.example .env
 ```
 
-填写：
+填写（四项必须对号入座，**不要把 Access Token 填进 `X_API_KEY`**）：
 
-| 变量 | 说明 |
-|------|------|
-| `X_API_KEY` | Consumer Key |
-| `X_API_SECRET` | Consumer Secret |
-| `X_ACCESS_TOKEN` | User Access Token |
-| `X_ACCESS_TOKEN_SECRET` | User Access Token Secret |
-| `XMANAGER_LOG_DIR` | 可选，日志目录，默认 `logs` |
-| `XMANAGER_LOG_LEVEL` | 可选，`debug` / `info` / `warn` / `error`，默认 `info` |
+| 变量 | 门户上的名称 | 说明 |
+|------|----------------|------|
+| `X_API_KEY` | API Key / Consumer Key | 应用密钥。**不是** `用户ID-…` 那一串 |
+| `X_API_SECRET` | API Key Secret / Consumer Secret | 应用密钥的 Secret |
+| `X_ACCESS_TOKEN` | Access Token | 用户令牌，形如 `{你的数字ID}-xxxxxxxx` |
+| `X_ACCESS_TOKEN_SECRET` | Access Token Secret | 用户令牌的 Secret |
+| `X_BEARER_TOKEN` | Bearer Token | 可选；App-only，拉自己的时间线不用 |
+| `XMANAGER_LOG_DIR` | — | 可选，日志目录，默认 `logs` |
+| `XMANAGER_LOG_LEVEL` | — | 可选，`debug` / `info` / `warn` / `error`，默认 `info` |
+
+侧栏的「凭证已配置」只检查四项是否非空，**不会联网 whoami**。Access Token 以 `{10–19 位数字}-` 开头；若这串出现在 `X_API_KEY` 里，界面会提示字段填反，并指向 [console.x.com](https://console.x.com) → Keys and tokens。点「刷新状态」才做一次真实校验。
 
 ### Developer Portal 简要步骤
 
 1. 创建 Project + App  
-2. 开启 **Read and Write**  
-3. 生成 User Access Token / Secret  
-4. 将 Key/Secret/Token 写入 `.env`
+2. 开通所需访问（当前多为按量付费 / pay-per-use）  
+3. 开启 **Read and write**（改权限后必须重新生成 User Token）  
+4. 在 Keys and tokens 分别复制 Consumer Key/Secret 与 User Access Token/Secret 写入 `.env`
 
 ## 构建与运行
 
@@ -222,8 +225,9 @@ export_csv(&low, "exports/low.csv")?;
 ## 注意
 
 - **删除不可恢复**，务必先导出或 dry-run  
-- 注意 API 速率限制与费用  
-- `impression_count` 为展示次数，可能与网页统计略有差异  
+- 曝光优先读用户上下文的 `non_public_metrics.impression_count`，否则用 `public_metrics`；字段缺失时按 0，不中断解析  
+- 桌面端默认先筛「曝光 ≤ 50、不含回帖/转发」，便于找低曝光内容；筛选后若为 0 条，点芯片或「清除筛选」即可看到全部拉取结果  
+- 注意 API 速率限制与费用；429 时界面不会长时间卡住等待  
 - 诊断与删除审计写在 `logs/`（app 保留 14 天，audit 保留 90 天）；不含密钥与推文正文 
 
 ## License
