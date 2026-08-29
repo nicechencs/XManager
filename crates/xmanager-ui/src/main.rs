@@ -5,12 +5,35 @@ mod theme;
 mod views;
 mod widgets;
 
+use std::borrow::Cow;
+
 use app::AppState;
 use gpui::{
-    prelude::*, px, size, App, Application, Bounds, Context, TitlebarOptions, Window, WindowBounds,
-    WindowOptions,
+    prelude::*, px, size, App, Application, AssetSource, Bounds, Context, SharedString,
+    TitlebarOptions, Window, WindowBounds, WindowOptions,
 };
 use xmanager_core::logging::{self, events, Outcome, Stream};
+
+struct UiAssets;
+
+impl AssetSource for UiAssets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
+        Ok(match path.replace('\\', "/").as_str() {
+            "logo.png" => Some(Cow::Borrowed(include_bytes!("../assets/logo.png"))),
+            "logo.svg" => Some(Cow::Borrowed(include_bytes!("../assets/logo.svg"))),
+            _ => None,
+        })
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        let path = path.replace('\\', "/");
+        Ok(["logo.png", "logo.svg"]
+            .into_iter()
+            .filter(|file| path.is_empty() || path == "." || file.starts_with(&path))
+            .map(SharedString::from)
+            .collect())
+    }
+}
 
 impl Render for AppState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -36,11 +59,12 @@ fn main() {
         .field("file_logging", logging_ok)
         .emit();
 
-    Application::new().run(|cx: &mut App| {
+    Application::new().with_assets(UiAssets).run(|cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                app_id: Some("xmanager".into()),
                 titlebar: Some(TitlebarOptions {
                     title: Some("XManager".into()),
                     ..Default::default()

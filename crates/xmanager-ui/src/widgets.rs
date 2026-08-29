@@ -2,10 +2,19 @@
 
 use crate::theme::{self, control, radius, space};
 use gpui::{
-    div, prelude::*, px, App, ClickEvent, Div, InteractiveElement, Rgba, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Window,
+    div, img, prelude::*, px, App, ClickEvent, Div, InteractiveElement, Rgba, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, Window,
 };
 use xmanager_core::PostKind;
+
+pub fn app_logo() -> Div {
+    div()
+        .size(px(28.))
+        .rounded(px(radius::MD))
+        .overflow_hidden()
+        .flex_none()
+        .child(img("logo.png").size(px(28.)))
+}
 
 /// Card chrome: hairline + light shadow + 8px radius.
 pub fn surface_card<E: Styled>(el: E) -> E {

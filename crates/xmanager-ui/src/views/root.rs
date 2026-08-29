@@ -7,7 +7,7 @@ use crate::app::{
 use crate::theme::{self, space};
 use crate::views::{status_bar, toolbar, tweet_list};
 use crate::widgets::{
-    btn, count_badge, danger_btn, kind_badge, metric_tile, nav_destination, page_heading,
+    app_logo, btn, count_badge, danger_btn, kind_badge, metric_tile, nav_destination, page_heading,
     section_label, status_pill, stepper, surface_card, toggle_chip,
 };
 use gpui::{
@@ -620,13 +620,25 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .border_r_1()
         .border_color(theme::c(theme::BORDER))
         .child(
-            theme::type_display(div().text_color(theme::c(theme::TEXT))).child(if show_labels {
-                "XManager"
-            } else {
-                "XM"
-            }),
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(space::SM))
+                .child(app_logo())
+                .when(show_labels, |el| {
+                    el.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                theme::type_display(div().text_color(theme::c(theme::TEXT)))
+                                    .child("XManager"),
+                            )
+                            .child(section_label("工作台")),
+                    )
+                }),
         )
-        .when(show_labels, |el| el.child(section_label("工作台")))
         .child(nav_destination(
             "nav-library",
             if compact { "内容" } else { "内容库" },

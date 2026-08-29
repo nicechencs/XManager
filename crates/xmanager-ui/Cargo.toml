@@ -16,3 +16,6 @@ anyhow.workspace = true
 gpui.workspace = true
 chrono.workspace = true
 serde.workspace = true
+
+[build-dependencies]
+embed-resource = "3.0"
