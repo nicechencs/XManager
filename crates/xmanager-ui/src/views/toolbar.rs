@@ -3,8 +3,8 @@
 use crate::app::{
     chip_label, is_default_cleanup_preset, AppState, AppliedFilterChip, ExportFormat, Route,
 };
-use crate::theme;
-use crate::widgets::{btn, removable_chip, toggle_chip};
+use crate::theme::{self, space};
+use crate::widgets::{btn, removable_chip, surface_card, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
 
 pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
@@ -14,9 +14,9 @@ pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Op
             .flex_row()
             .flex_wrap()
             .items_center()
-            .gap_2()
-            .px_4()
-            .py_2()
+            .gap(px(space::SM))
+            .px(px(space::LG))
+            .py(px(space::SM))
             .bg(theme::c(theme::CHIP_ACTIVE))
             .border_b_1()
             .border_color(theme::c(theme::ACCENT))
@@ -82,28 +82,17 @@ fn applied_chip(
 }
 
 fn kpi(label: &str, value: impl Into<String>) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .min_w(px(90.))
-        .px_2()
-        .py_1()
-        .rounded_sm()
-        .bg(theme::c(theme::BG_ELEVATED))
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(label.to_string()),
-        )
-        .child(
-            div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
-                .child(value.into()),
-        )
+    surface_card(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(space::XS))
+            .min_w(px(96.))
+            .px(px(space::MD))
+            .py(px(space::SM)),
+    )
+    .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.to_string()))
+    .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(value.into()))
 }
 
 pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
@@ -112,9 +101,9 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap_2()
-        .px_4()
-        .py_3()
+        .gap(px(space::MD))
+        .px(px(space::LG))
+        .py(px(space::MD))
         .bg(theme::c(theme::BG_PANEL))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
@@ -174,7 +163,7 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex_row()
                 .flex_wrap()
                 .items_center()
-                .gap_2()
+                .gap(px(space::SM))
                 .children([
                     toggle_chip(
                         "filter-drawer-toggle",
@@ -218,7 +207,7 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex_row()
                 .flex_wrap()
                 .items_center()
-                .gap_1()
+                .gap(px(space::SM))
                 .children(chips)
                 .when(has_chips, |el| {
                     el.child(btn(
@@ -236,9 +225,7 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         })
         .when(is_default_cleanup_preset(&state.applied_filter), |el| {
             el.child(
-                div()
-                    .text_xs()
-                    .text_color(theme::c(theme::TEXT_DIM))
+                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
                     .child("默认范围：曝光≤50、不含回帖/转发。点芯片即可放宽。"),
             )
         })
@@ -247,11 +234,9 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex()
                 .flex_row()
                 .flex_wrap()
-                .gap_2()
+                .gap(px(space::SM))
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme::c(theme::TEXT_MUTED))
+                    theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED)))
                         .child(active_filter_summary(state)),
                 )
                 .child(kpi("结果", s.count.to_string()))
@@ -272,29 +257,26 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_row()
         .flex_wrap()
         .items_center()
-        .gap_2()
-        .min_h(px(48.))
-        .px_4()
-        .py_2()
+        .gap(px(space::SM))
+        .min_h(px(56.))
+        .px(px(space::LG))
+        .py(px(space::SM))
         .bg(theme::c(theme::BG_PANEL))
         .border_t_1()
         .border_color(theme::c(theme::BORDER))
         .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(if can_stage {
-                    theme::c(theme::TEXT)
-                } else {
-                    theme::c(theme::TEXT_MUTED)
-                })
-                .child(if has_selection {
-                    format!("已选 {} 条，加入后仍留在内容库", state.selected.len())
-                } else if has_focus {
-                    "已查看当前推文，可加入安全清理（不会离开本页）".into()
-                } else {
-                    "勾选左侧方框，或点开一条后加入安全清理".into()
-                }),
+            theme::type_label(div().text_color(if can_stage {
+                theme::c(theme::TEXT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            }))
+            .child(if has_selection {
+                format!("已选 {} 条，加入后仍留在内容库", state.selected.len())
+            } else if has_focus {
+                "已查看当前推文，可加入安全清理（不会离开本页）".into()
+            } else {
+                "勾选左侧方框，或点开一条后加入安全清理".into()
+            }),
         )
         .child(btn(
             "select-all-btn",

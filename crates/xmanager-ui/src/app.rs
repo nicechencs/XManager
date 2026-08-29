@@ -384,6 +384,21 @@ pub enum LibraryEmptyKind {
     FilteredEmpty,
 }
 
+impl LibraryEmptyKind {
+    /// Single-glyph mark for the illustration-free empty panel.
+    pub fn mark(self) -> &'static str {
+        match self {
+            Self::Loading => "…",
+            Self::CredentialsMissing => "钥",
+            Self::CredentialsSwapped => "换",
+            Self::FetchFailed => "!",
+            Self::NeverSynced => "↓",
+            Self::AccountEmpty => "空",
+            Self::FilteredEmpty => "筛",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryEmptyCopy {
     pub kind: LibraryEmptyKind,
@@ -2359,6 +2374,8 @@ mod tests {
         assert_eq!(filtered.kind, LibraryEmptyKind::FilteredEmpty);
         assert!(filtered.title.contains("87"));
         assert!(filtered.detail.contains("清除筛选"));
+        assert_eq!(LibraryEmptyKind::CredentialsSwapped.mark(), "换");
+        assert_eq!(LibraryEmptyKind::FilteredEmpty.mark(), "筛");
 
         let account = library_empty_copy(false, 0, 0, true, false, CredentialLayout::Ready);
         assert_eq!(account.kind, LibraryEmptyKind::AccountEmpty);

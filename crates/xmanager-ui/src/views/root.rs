@@ -4,11 +4,11 @@ use crate::app::{
     cleanup_next_hint, resolve_focused_tweet, tweet_preview_label, AppState, DeleteConfirmToken,
     ExportFormat, Route,
 };
-use crate::theme;
+use crate::theme::{self, space};
 use crate::views::{status_bar, toolbar, tweet_list};
 use crate::widgets::{
     btn, count_badge, danger_btn, kind_badge, metric_tile, nav_destination, page_heading,
-    section_label, stepper, toggle_chip,
+    section_label, status_pill, stepper, surface_card, toggle_chip,
 };
 use gpui::{
     div, prelude::*, px, Context, CursorStyle, Div, KeyDownEvent, MouseButton, MouseDownEvent,
@@ -52,8 +52,8 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
         })
         .when(!overlay, |el| el.w(px(300.)).flex_none())
         .h_full()
-        .gap_2()
-        .p_3()
+        .gap(px(space::SM))
+        .p(px(space::MD))
         .overflow_y_scroll()
         .bg(theme::c(theme::BG_PANEL))
         .when(!overlay, |el| {
@@ -81,7 +81,7 @@ fn filter_drawer(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> 
                 }),
         )
         .child(
-            theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
+            theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED)))
                 .child("默认先看曝光≤50 的原创/引用，方便找低曝光内容。点芯片或「清除筛选」可看全部。改条件后列表立即更新。"),
         )
         .child(section_label("时间范围"))
@@ -441,10 +441,7 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                     .child(metric_tile("转发", metrics.retweet_count.to_string()))
                     .child(metric_tile("回复", metrics.reply_count.to_string()))
                     .child(metric_tile("互动量", tweet.engagement().to_string()))
-                    .child(metric_tile(
-                        "点赞率",
-                        Tweet::format_rate(tweet.like_rate()),
-                    ))
+                    .child(metric_tile("点赞率", Tweet::format_rate(tweet.like_rate())))
                     .child(metric_tile(
                         "互动率",
                         Tweet::format_rate(tweet.engagement_rate()),
@@ -571,12 +568,9 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                             state.cleanup_candidates.len().to_string(),
                         )),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme::c(theme::TEXT_DIM))
-                        .child("J / K 上下条 · 空格勾选 · / 打开筛选 · 1 内容库 · 2 洞察 · 3 清理 · Esc 关闭"),
-                )
+                .child(div().text_xs().text_color(theme::c(theme::TEXT_DIM)).child(
+                    "J / K 上下条 · 空格勾选 · / 打开筛选 · 1 内容库 · 2 洞察 · 3 清理 · Esc 关闭",
+                ))
         }))
 }
 
@@ -587,13 +581,14 @@ fn error_banner(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
             .flex_row()
             .items_center()
             .justify_between()
-            .px_4()
-            .py_2()
+            .gap(px(space::SM))
+            .px(px(space::LG))
+            .py(px(space::SM))
             .bg(theme::c(theme::ERROR_BG))
+            .border_b_1()
+            .border_color(theme::c(theme::DANGER))
             .child(
-                div()
-                    .text_sm()
-                    .text_color(theme::c(theme::TEXT))
+                theme::type_body(div().flex_1().text_color(theme::c(theme::TEXT)))
                     .child(msg.clone()),
             )
             .child(btn(
@@ -619,14 +614,17 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .w(px(nav_w))
         .flex_none()
         .h_full()
-        .p_3()
-        .gap_2()
+        .p(px(space::MD))
+        .gap(px(space::SM))
         .bg(theme::c(theme::BG_PANEL))
         .border_r_1()
         .border_color(theme::c(theme::BORDER))
         .child(
-            theme::type_display(div().text_color(theme::c(theme::TEXT)))
-                .child(if show_labels { "XManager" } else { "XM" }),
+            theme::type_display(div().text_color(theme::c(theme::TEXT))).child(if show_labels {
+                "XManager"
+            } else {
+                "XM"
+            }),
         )
         .when(show_labels, |el| el.child(section_label("工作台")))
         .child(nav_destination(
@@ -654,55 +652,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             cx.listener(|this, _, _window, cx| this.set_route(Route::Cleanup, cx)),
         ))
         .child(div().flex_1())
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(if show_labels {
-                    format!("{} 条数据", state.all_tweets.len())
-                } else {
-                    format!("{} 条", state.all_tweets.len())
-                }),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(match &state.last_synced_at {
-                    Some(ts) if show_labels => format!("同步 {ts}"),
-                    Some(ts) => ts.to_string(),
-                    None if show_labels => "尚未同步".into(),
-                    None => "未同步".into(),
-                }),
-        )
-        .when(show_labels, |el| {
-            el.child(
-                div()
-                    .text_xs()
-                    .text_color(if crate::app::credentials_line_healthy(
-                        state.credential_layout,
-                        state.current_user.is_some(),
-                    ) {
-                        theme::c(theme::SUCCESS)
-                    } else {
-                        theme::c(theme::WARNING)
-                    })
-                    .child(state.credentials_msg.clone()),
-            )
-        })
-        .child(btn(
-            "sidebar-refresh",
-            if show_labels { "刷新状态" } else { "刷新" },
-            false,
-            !state.loading,
-            cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
-        ))
-        .when(show_labels, |el| {
-            el.child(
-                theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
-                    .child("J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页 · Esc 关闭"),
-            )
-        })
+        .child(sidebar_account_card(state, show_labels, cx))
         .child(btn(
             "sidebar-theme",
             if show_labels {
@@ -720,6 +670,45 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         ))
 }
 
+fn sidebar_account_card(state: &AppState, show_labels: bool, cx: &mut Context<AppState>) -> Div {
+    let creds_ok =
+        crate::app::credentials_line_healthy(state.credential_layout, state.current_user.is_some());
+    let sync_line = match &state.last_synced_at {
+        Some(ts) if show_labels => format!("同步 {ts}"),
+        Some(ts) => ts.to_string(),
+        None if show_labels => "尚未同步".into(),
+        None => "未同步".into(),
+    };
+    let count_line = if show_labels {
+        format!("{} 条数据", state.all_tweets.len())
+    } else {
+        format!("{} 条", state.all_tweets.len())
+    };
+    surface_card(div().flex().flex_col().gap(px(space::SM)).p(px(space::SM)))
+        .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(count_line))
+        .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM))).child(sync_line))
+        .when(show_labels, |el| {
+            el.child(status_pill(creds_ok, state.credentials_msg.clone()))
+        })
+        .child(btn(
+            "sidebar-refresh",
+            if show_labels {
+                "刷新状态"
+            } else {
+                "刷新"
+            },
+            false,
+            !state.loading,
+            cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
+        ))
+        .when(show_labels, |el| {
+            el.child(
+                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
+                    .child("J/K · 空格 · / 筛选 · 1–3 切页"),
+            )
+        })
+}
+
 fn loading_banner(state: &AppState) -> Option<Div> {
     if !state.loading {
         return None;
@@ -730,9 +719,9 @@ fn loading_banner(state: &AppState) -> Option<Div> {
             .flex()
             .flex_row()
             .items_center()
-            .gap_2()
-            .px_4()
-            .py_2()
+            .gap(px(space::SM))
+            .px(px(space::LG))
+            .py(px(space::SM))
             .bg(theme::c(theme::BG_ELEVATED))
             .border_b_1()
             .border_color(theme::c(theme::BORDER))
@@ -949,8 +938,8 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_col()
         .flex_1()
         .min_h(px(0.))
-        .p_4()
-        .gap_3()
+        .p(px(space::LG))
+        .gap(px(space::LG))
         .child(page_heading("安全清理", next_hint))
         .child({
             let stacked = state.layout_mode.stack_cleanup_steps();
@@ -972,12 +961,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     state.has_valid_backup() && state.has_valid_preview(),
                     stacked,
                 ))
-                .child(step_card(
-                    "3",
-                    "二次确认",
-                    confirm.is_some(),
-                    stacked,
-                ))
+                .child(step_card("3", "二次确认", confirm.is_some(), stacked))
                 .child(step_card(
                     "4",
                     "确认并删除",
@@ -1294,18 +1278,20 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                                         },
                                     ))
                                     .child(
-                                        theme::type_mono(
-                                            div().text_color(theme::c(if typed_empty {
+                                        theme::type_mono(div().text_color(theme::c(
+                                            if typed_empty {
                                                 theme::TEXT_MUTED
                                             } else {
                                                 theme::TEXT
-                                            })),
-                                        )
-                                        .child(if typed_empty {
-                                            "输入数量或 DELETE".to_string()
-                                        } else {
-                                            typed_confirm.clone()
-                                        }),
+                                            },
+                                        )))
+                                        .child(
+                                            if typed_empty {
+                                                "输入数量或 DELETE".to_string()
+                                            } else {
+                                                typed_confirm.clone()
+                                            },
+                                        ),
                                     ),
                             )
                             .child(btn(
@@ -1379,39 +1365,38 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
 }
 
 fn step_card(number: &str, label: &str, done: bool, stacked: bool) -> Div {
-    div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .px_3()
-        .py_2()
-        .when(stacked, |el| el.w_full())
-        .rounded_md()
-        .bg(if done {
-            theme::c(theme::CHIP_ACTIVE)
-        } else {
-            theme::c(theme::BG_ELEVATED)
-        })
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::BOLD)
-                .child(number.to_string()),
-        )
-        .child(div().text_sm().child(label.to_string()))
-        .child(
-            div()
-                .text_xs()
-                .text_color(if done {
-                    theme::c(theme::SUCCESS)
-                } else {
-                    theme::c(theme::TEXT_DIM)
-                })
-                .child(if done { "完成" } else { "待处理" }),
-        )
+    surface_card(
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(space::SM))
+            .px(px(space::MD))
+            .py(px(space::SM))
+            .when(stacked, |el| el.w_full()),
+    )
+    .bg(if done {
+        theme::c(theme::CHIP_ACTIVE)
+    } else {
+        theme::c(theme::BG_ELEVATED)
+    })
+    .child(
+        div()
+            .text_sm()
+            .font_weight(gpui::FontWeight::BOLD)
+            .child(number.to_string()),
+    )
+    .child(div().text_sm().child(label.to_string()))
+    .child(
+        div()
+            .text_xs()
+            .text_color(if done {
+                theme::c(theme::SUCCESS)
+            } else {
+                theme::c(theme::TEXT_DIM)
+            })
+            .child(if done { "完成" } else { "待处理" }),
+    )
 }
 
 pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::IntoElement {
@@ -1430,20 +1415,20 @@ pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::I
             .text_color(theme::c(theme::TEXT))
             .tab_index(0),
     )
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-            if this.handle_workspace_key(event.keystroke.key.as_str(), cx) {
-                cx.stop_propagation();
-            }
-        }))
-        .children(error_banner(state, cx))
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_1()
-                .min_h(px(0.))
-                .child(navigation_sidebar(state, cx))
-                .child(page),
-        )
-        .child(status_bar::render_status_bar(state))
+    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+        if this.handle_workspace_key(event.keystroke.key.as_str(), cx) {
+            cx.stop_propagation();
+        }
+    }))
+    .children(error_banner(state, cx))
+    .child(
+        div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            .min_h(px(0.))
+            .child(navigation_sidebar(state, cx))
+            .child(page),
+    )
+    .child(status_bar::render_status_bar(state))
 }

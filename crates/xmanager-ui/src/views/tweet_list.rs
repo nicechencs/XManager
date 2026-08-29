@@ -1,8 +1,8 @@
 //! Virtualized tweet list with checkbox selection, kind & rates.
 
 use crate::app::{chip_label, library_empty_copy, AppState, LibraryEmptyKind};
-use crate::theme;
-use crate::widgets::{btn, checkbox_mark, kind_color, removable_chip, truncate_text};
+use crate::theme::{self, space};
+use crate::widgets::{btn, checkbox_mark, empty_mark, kind_color, removable_chip, truncate_text};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window};
 use xmanager_core::{SortField, SortOrder, Tweet};
 
@@ -16,17 +16,18 @@ const COL_LIKE_R: f32 = 56.0;
 const COL_BM_R: f32 = 56.0;
 const COL_ENG_R: f32 = 56.0;
 const CARD_ROW_H: f32 = 92.0;
-const TABLE_ROW_H: f32 = 40.0;
+const TABLE_ROW_H: f32 = 44.0;
 
 fn header_cell(label: &str, width: f32) -> Div {
-    div()
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(theme::c(theme::TEXT_MUTED))
-        .child(label.to_string())
+    theme::type_meta(
+        div()
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(theme::c(theme::TEXT_MUTED)),
+    )
+    .child(label.to_string())
 }
 
 fn sort_header(
@@ -44,42 +45,44 @@ fn sort_header(
     } else {
         " ↓"
     };
-    div()
-        .id(SharedString::from(format!("sort-header-{label}")))
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .font_weight(if active {
-            gpui::FontWeight::SEMIBOLD
-        } else {
-            gpui::FontWeight::MEDIUM
-        })
-        .text_color(if active {
-            theme::c(theme::ACCENT)
-        } else {
-            theme::c(theme::TEXT_MUTED)
-        })
-        .cursor_pointer()
-        .hover(|s| s.text_color(theme::c(theme::TEXT)))
-        .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx)))
-        .child(format!("{label}{arrow}"))
+    theme::type_meta(
+        div()
+            .id(SharedString::from(format!("sort-header-{label}")))
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .font_weight(if active {
+                gpui::FontWeight::SEMIBOLD
+            } else {
+                gpui::FontWeight::MEDIUM
+            })
+            .text_color(if active {
+                theme::c(theme::ACCENT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            })
+            .cursor_pointer()
+            .hover(|s| s.text_color(theme::c(theme::TEXT)))
+            .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx))),
+    )
+    .child(format!("{label}{arrow}"))
 }
 
 fn cell(text: impl Into<SharedString>, width: f32, muted: bool) -> Div {
-    div()
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .text_color(if muted {
-            theme::c(theme::TEXT_MUTED)
-        } else {
-            theme::c(theme::TEXT)
-        })
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .child(text.into())
+    theme::type_body(
+        div()
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .text_color(if muted {
+                theme::c(theme::TEXT_MUTED)
+            } else {
+                theme::c(theme::TEXT)
+            })
+            .overflow_hidden()
+            .whitespace_nowrap(),
+    )
+    .child(text.into())
 }
 
 fn row_bg(focused: bool, selected: bool, ix: usize) -> gpui::Rgba {
@@ -121,9 +124,9 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex()
         .flex_row()
         .items_center()
-        .h(px(36.))
-        .px_2()
-        .bg(theme::c(theme::BG_ELEVATED))
+        .h(px(40.))
+        .px(px(space::SM))
+        .bg(theme::c(theme::BG_PANEL))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
         .child(header_cell("", COL_CHECK))
@@ -160,13 +163,14 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
             cx,
         ))
         .child(
-            div()
-                .flex_1()
-                .px_1()
-                .text_xs()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme::c(theme::TEXT_MUTED))
+            div().flex_1().px(px(space::SM)).child(
+                theme::type_meta(
+                    div()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(theme::c(theme::TEXT_MUTED)),
+                )
                 .child("内容"),
+            ),
         )
 }
 
@@ -235,21 +239,12 @@ fn first_load_skeleton(title: &'static str, detail: &'static str) -> Div {
             div()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .px_4()
-                .py_3()
+                .gap(px(space::XS))
+                .px(px(space::LG))
+                .py(px(space::MD))
+                .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(title))
                 .child(
-                    div()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(theme::c(theme::TEXT))
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::c(theme::TEXT_MUTED))
-                        .child(detail),
+                    theme::type_body(div().text_color(theme::c(theme::TEXT_MUTED))).child(detail),
                 ),
         )
         .children((0..8).map(skeleton_row))
@@ -307,21 +302,17 @@ fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_1()
         .items_center()
         .justify_center()
-        .gap_3()
-        .px_6()
+        .gap(px(space::MD))
+        .px(px(space::XL))
+        .child(empty_mark(copy.kind.mark()))
+        .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(copy.title))
         .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
-                .child(copy.title),
-        )
-        .child(
-            div()
-                .max_w(px(460.))
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(copy.detail),
+            theme::type_body(
+                div()
+                    .max_w(px(440.))
+                    .text_color(theme::c(theme::TEXT_MUTED)),
+            )
+            .child(copy.detail),
         )
         .when(has_chips, |el| {
             el.child(
@@ -330,55 +321,41 @@ fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     .flex_row()
                     .flex_wrap()
                     .justify_center()
-                    .gap_1()
+                    .gap(px(space::SM))
                     .children(chip_els),
             )
         })
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_2()
-                .when(need_refresh, |el| {
-                    el.child(btn(
-                        "empty-refresh",
-                        "刷新状态",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
-                    ))
-                })
-                .when(need_fetch, |el| {
-                    el.child(btn(
-                        "empty-fetch",
-                        "拉取并分析",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| this.fetch_tweets(cx)),
-                    ))
-                })
-                .when(no_match, |el| {
-                    el.child(btn(
-                        "empty-clear-filters",
-                        "清除筛选",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| {
-                            this.filter_draft = crate::app::FilterDraft::unrestricted();
-                            this.apply_filters(cx);
-                            cx.notify();
-                        }),
-                    ))
-                    .child(btn(
-                        "empty-open-filters",
-                        "打开筛选",
-                        false,
-                        true,
-                        cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
-                    ))
+        .when(need_refresh, |el| {
+            el.child(btn(
+                "empty-refresh",
+                "刷新状态",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
+            ))
+        })
+        .when(need_fetch, |el| {
+            el.child(btn(
+                "empty-fetch",
+                "拉取并分析",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| this.fetch_tweets(cx)),
+            ))
+        })
+        .when(no_match, |el| {
+            el.child(btn(
+                "empty-clear-filters",
+                "清除筛选",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| {
+                    this.filter_draft = crate::app::FilterDraft::unrestricted();
+                    this.apply_filters(cx);
+                    cx.notify();
                 }),
-        )
+            ))
+        })
 }
 
 fn row_checkbox(id: String, selected: bool, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -422,7 +399,7 @@ fn tweet_table_row(
         .flex_row()
         .items_center()
         .h(px(TABLE_ROW_H))
-        .px_2()
+        .px(px(space::SM))
         .bg(row_bg(focused, selected, ix))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
@@ -433,14 +410,15 @@ fn tweet_table_row(
         }))
         .child(row_checkbox(id, selected, cx))
         .child(
-            div()
-                .w(px(COL_KIND))
-                .flex_none()
-                .px_1()
-                .text_xs()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(kind_color(kind))
-                .child(kind.short()),
+            theme::type_meta(
+                div()
+                    .w(px(COL_KIND))
+                    .flex_none()
+                    .px(px(space::SM))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(kind_color(kind)),
+            )
+            .child(kind.short()),
         )
         .child(cell(date, COL_DATE, true))
         .child(cell(format!("{views}"), COL_VIEWS, false))
@@ -450,15 +428,15 @@ fn tweet_table_row(
         .child(cell(bm_r, COL_BM_R, false))
         .child(cell(eng_r, COL_ENG_R, false))
         .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .px_1()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT))
-                .overflow_hidden()
-                .whitespace_nowrap()
+            div().flex_1().min_w(px(0.)).px(px(space::SM)).child(
+                theme::type_body(
+                    div()
+                        .text_color(theme::c(theme::TEXT))
+                        .overflow_hidden()
+                        .whitespace_nowrap(),
+                )
                 .child(text_preview),
+            ),
         )
 }
 
@@ -484,9 +462,9 @@ fn tweet_card_row(
         .flex_row()
         .items_start()
         .h(px(CARD_ROW_H))
-        .px_2()
-        .py_2()
-        .gap_1()
+        .px(px(space::MD))
+        .py(px(space::SM))
+        .gap(px(space::SM))
         .bg(row_bg(focused, selected, ix))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))

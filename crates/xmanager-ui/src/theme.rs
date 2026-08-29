@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use gpui::{px, rgb, FontWeight, SharedString, Styled, Rgba};
+use gpui::{px, rgb, FontWeight, Rgba, SharedString, Styled};
 
 /// Cross-platform UI sans. GPUI takes one family; CJK coverage depends on the OS.
 pub fn ui_font_family() -> SharedString {
@@ -26,46 +26,54 @@ pub fn mono_font_family() -> SharedString {
     })
 }
 
-/// Type scale in CSS pixels. Line height is ~1.45× size so CJK and Latin stay readable.
+/// Type scale in CSS pixels. Title / body / meta, line height ~1.45×.
 pub mod type_scale {
+    /// Meta: table headers, status bar, chip labels.
     pub const CAPTION: f32 = 12.0;
     pub const CAPTION_LINE: f32 = 18.0;
-    pub const BODY: f32 = 13.0;
-    pub const BODY_LINE: f32 = 20.0;
-    pub const TITLE: f32 = 16.0;
-    pub const TITLE_LINE: f32 = 24.0;
-    pub const DISPLAY: f32 = 20.0;
-    pub const DISPLAY_LINE: f32 = 28.0;
+    pub const BODY: f32 = 14.0;
+    pub const BODY_LINE: f32 = 22.0;
+    pub const TITLE: f32 = 18.0;
+    pub const TITLE_LINE: f32 = 26.0;
+    pub const DISPLAY: f32 = 22.0;
+    pub const DISPLAY_LINE: f32 = 30.0;
     /// Letter-spacing in px. Titles are slightly tight; captions are slightly open.
     pub const TRACKING_TIGHT: f32 = -0.2;
     pub const TRACKING_NORMAL: f32 = 0.0;
     pub const TRACKING_OPEN: f32 = 0.2;
 }
 
-/// 4px rhythm used by padding, gaps, and control heights.
+/// 8px rhythm (4px half-step for icon internals).
 pub mod space {
     pub const XS: f32 = 4.0;
     pub const SM: f32 = 8.0;
-    pub const MD: f32 = 12.0;
-    pub const LG: f32 = 16.0;
-    pub const XL: f32 = 24.0;
+    pub const MD: f32 = 16.0;
+    pub const LG: f32 = 24.0;
+    pub const XL: f32 = 32.0;
 }
 
 pub mod radius {
-    pub const SM: f32 = 4.0;
-    pub const MD: f32 = 6.0;
+    pub const SM: f32 = 6.0;
+    pub const MD: f32 = 8.0;
+    pub const LG: f32 = 12.0;
 }
 
 pub mod control {
     pub const HEIGHT: f32 = 32.0;
     pub const CHIP_HEIGHT: f32 = 28.0;
     pub const ICON: f32 = 24.0;
+    pub const EMPTY_MARK: f32 = 40.0;
 }
 
 pub fn type_caption<E: Styled>(el: E) -> E {
     el.text_size(px(type_scale::CAPTION))
         .line_height(px(type_scale::CAPTION_LINE))
         .font_weight(FontWeight::NORMAL)
+}
+
+/// Same size as caption; name used for status / table meta.
+pub fn type_meta<E: Styled>(el: E) -> E {
+    type_caption(el)
 }
 
 pub fn type_body<E: Styled>(el: E) -> E {
@@ -206,16 +214,16 @@ fn palette(hex: u32, mode: ThemeMode) -> u32 {
     }
 
     match hex {
-        BG => 0xf5_f7_fb,
+        BG => 0xf4_f4_f5,
         BG_ELEVATED => 0xff_ff_ff,
         BG_PANEL => 0xff_ff_ff,
         BG_ROW => 0xff_ff_ff,
-        BG_ROW_ALT => 0xf7_f9_fc,
-        BG_ROW_SELECTED => 0xe6_f0_ff,
-        BG_SELECTED => 0xcf_e3_ff,
-        BG_HOVER => 0xed_f4_ff,
-        BORDER => 0xd7_de_e8,
-        BORDER_STRONG => 0xb7_c3_d3,
+        BG_ROW_ALT => 0xfa_fa_fb,
+        BG_ROW_SELECTED => 0xee_f2_ff,
+        BG_SELECTED => 0xe0_e7_ff,
+        BG_HOVER => 0xf4_f4_f5,
+        BORDER => 0xe4_e4_e7,
+        BORDER_STRONG => 0xd4_d4_d8,
         TEXT => 0x17_20_33,
         TEXT_MUTED => 0x4f_5d_70,
         TEXT_DIM => 0x7b_87_98,
@@ -295,9 +303,10 @@ mod tests {
         assert!(type_scale::TITLE_LINE > type_scale::TITLE);
         assert!(type_scale::DISPLAY_LINE > type_scale::DISPLAY);
         assert_eq!(space::SM, space::XS * 2.0);
-        assert_eq!(space::MD, space::XS * 3.0);
-        assert_eq!(space::LG, space::XS * 4.0);
-        assert_eq!(control::HEIGHT, space::XL + space::SM);
+        assert_eq!(space::MD, space::SM * 2.0);
+        assert_eq!(space::LG, space::SM * 3.0);
+        assert_eq!(space::XL, space::SM * 4.0);
+        assert_eq!(control::HEIGHT, space::XL);
         assert!(type_scale::TRACKING_TIGHT < type_scale::TRACKING_NORMAL);
         assert!(type_scale::TRACKING_OPEN > type_scale::TRACKING_NORMAL);
         let _ = (ui_font_family(), mono_font_family());
