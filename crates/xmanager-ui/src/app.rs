@@ -80,11 +80,6 @@ impl LayoutMode {
         matches!(self, Self::Narrow)
     }
 
-    /// Narrow cleanup stepper stacks the four step cards vertically.
-    pub fn stack_cleanup_steps(self) -> bool {
-        matches!(self, Self::Narrow)
-    }
-
     pub fn label_zh(self) -> &'static str {
         match self {
             Self::Wide => "宽屏",
@@ -228,42 +223,14 @@ pub enum Route {
     Cleanup,
 }
 
-/// Second-step confirmation tokens for irreversible deletion.
-/// Spec requires either the exact candidate count or the word `DELETE`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeleteConfirmToken {
-    Count,
-    DeleteWord,
-}
-
+/// One-click confirm panel shown after backup/preview, before irreversible delete.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteConfirm {
     pub expected_count: usize,
-    pub selected: Option<DeleteConfirmToken>,
-    /// Free-text confirm: exact count or the word DELETE (any case).
-    pub typed: String,
 }
 
-/// Chip or typed count/`DELETE` unlocks real deletion.
 pub fn delete_confirm_ready(confirm: &DeleteConfirm) -> bool {
-    if confirm.expected_count == 0 {
-        return false;
-    }
-    if matches!(
-        confirm.selected,
-        Some(DeleteConfirmToken::Count | DeleteConfirmToken::DeleteWord)
-    ) {
-        return true;
-    }
-    typed_delete_confirm_matches(&confirm.typed, confirm.expected_count)
-}
-
-pub fn typed_delete_confirm_matches(typed: &str, expected_count: usize) -> bool {
-    let t = typed.trim();
-    if t.is_empty() {
-        return false;
-    }
-    t.eq_ignore_ascii_case("DELETE") || t == expected_count.to_string()
+    confirm.expected_count > 0
 }
 
 /// Removable applied-filter chips shown in the Library toolbar.
@@ -578,26 +545,21 @@ pub fn next_sort_from_header(
 pub fn cleanup_next_hint(
     candidate_count: usize,
     credentials_ok: bool,
-    has_backup: bool,
-    has_preview: bool,
     confirm: Option<&DeleteConfirm>,
 ) -> String {
     if candidate_count == 0 {
         return "先回内容库勾选或打开一条，再点「加入安全清理」。加入后仍留在内容库，方便继续挑选。".into();
     }
     if !credentials_ok {
-        return "已有候选，但缺少有效 OAuth 凭证，无法真实删除。".into();
+        return "已有候选，但缺少有效 OAuth 凭证，无法删除。".into();
     }
-    if confirm.is_some() {
-        if confirm.is_some_and(delete_confirm_ready) {
-            return "已解锁。点「确认并删除」将永久删除这些推文。".into();
-        }
-        return "请选择「确认数量」或「DELETE」，然后点「确认并删除」。".into();
+    if let Some(confirm) = confirm {
+        return format!(
+            "将删除 {} 条。点「确认删除」后不可恢复；取消可继续复核。",
+            confirm.expected_count
+        );
     }
-    if has_backup && has_preview {
-        return "备份和预演已自动完成。点「真实删除」进入二次确认即可。".into();
-    }
-    "只需点「真实删除」：会自动备份并预演，再请你二次确认。下面的备份/预演是可选的。".into()
+    format!("复核列表后点「删除 {candidate_count} 条」。会先自动备份，再确认一次即可。")
 }
 
 /// Refresh only the cached content that the bounded API response actually includes.
@@ -1073,64 +1035,23 @@ impl AppState {
             cx.notify();
             return;
         }
-        self.delete_confirm = Some(DeleteConfirm {
-            expected_count: n,
-            selected: None,
-            typed: String::new(),
-        });
-        self.status_msg = SharedString::from(format!(
-            "请确认删除 {n} 条：输入 {n} 或 DELETE，或点选确认方式"
-        ));
+        self.delete_confirm = Some(DeleteConfirm { expected_count: n });
+        self.status_msg = SharedString::from(format!("将删除 {n} 条。点「确认删除」继续，或取消。"));
         self.error_msg = None;
         cx.notify();
     }
 
     pub fn cancel_delete_confirm(&mut self, cx: &mut Context<Self>) {
         if self.delete_confirm.take().is_some() {
-            self.status_msg = SharedString::from("已取消真实删除确认");
+            self.status_msg = SharedString::from("已取消删除");
             logging::info(Stream::Audit, events::CLEANUP_CANCEL)
                 .outcome(Outcome::Cancel)
-                .field("stage", "confirm_token")
+                .field("stage", "confirm")
                 .field("revision", self.cleanup_revision)
                 .field("count", self.cleanup_candidates.len() as u64)
                 .emit();
         }
         cx.notify();
-    }
-
-    pub fn select_delete_confirm_token(
-        &mut self,
-        token: DeleteConfirmToken,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(confirm) = self.delete_confirm.as_mut() {
-            confirm.selected = Some(token);
-            cx.notify();
-        }
-    }
-
-    pub fn push_delete_confirm_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        if let Some(confirm) = self.delete_confirm.as_mut() {
-            confirm.selected = None;
-            for ch in text.chars() {
-                if ch.is_control() {
-                    continue;
-                }
-                if confirm.typed.len() >= 32 {
-                    break;
-                }
-                confirm.typed.push(ch);
-            }
-            cx.notify();
-        }
-    }
-
-    pub fn backspace_delete_confirm(&mut self, cx: &mut Context<Self>) {
-        if let Some(confirm) = self.delete_confirm.as_mut() {
-            confirm.selected = None;
-            confirm.typed.pop();
-            cx.notify();
-        }
     }
 
     pub fn delete_confirm_is_ready(&self) -> bool {
@@ -1978,6 +1899,7 @@ impl AppState {
     }
 
     /// Backup if needed, then dry-run against the X API (or local cache if no creds).
+    #[allow(dead_code)]
     pub fn preview_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = window;
         if self.loading {
@@ -2027,11 +1949,11 @@ impl AppState {
         self.start_live_preview(true, cx);
     }
 
-    /// Commit real deletion after the in-app confirmation token is selected.
+    /// Commit real deletion after the in-app confirmation panel is accepted.
     pub fn confirm_and_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = window;
         if !self.delete_confirm_is_ready() {
-            self.set_error("请先选择「确认数量」或「DELETE」以解锁真实删除");
+            self.set_error("请先确认删除");
             cx.notify();
             return;
         }
@@ -2042,11 +1964,10 @@ impl AppState {
             .unwrap_or(0);
         if expected != self.cleanup_candidates.len() {
             self.delete_confirm = None;
-            self.set_error("候选数量已变化，请重新执行安全清理步骤");
+            self.set_error("候选数量已变化，请重新点删除");
             cx.notify();
             return;
         }
-        // Consume the confirmation so a second click cannot re-enter without re-confirming.
         self.delete_confirm = None;
         self.execute_real_delete(cx);
     }
@@ -2186,7 +2107,7 @@ mod tests {
         ids_for_cleanup_staging, is_default_cleanup_preset, library_empty_copy,
         next_sort_from_header, preview_from_lookup, receipt_matches, refresh_candidate_snapshot,
         resolve_focused_tweet, tweet_preview_label, workspace_shortcut, AppliedFilterChip,
-        DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft, LayoutMode,
+        DeleteConfirm, DeleteOutcome, FilterDraft, LayoutMode,
         LibraryEmptyKind, Receipt, WorkspaceShortcut, INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN,
     };
     use std::collections::{HashMap, HashSet};
@@ -2266,76 +2187,20 @@ mod tests {
 
     #[test]
     fn cleanup_hint_unlocks_delete_after_staging() {
-        let empty = cleanup_next_hint(0, true, false, false, None);
+        let empty = cleanup_next_hint(0, true, None);
         assert!(empty.contains("内容库"));
-        let staged = cleanup_next_hint(2, true, false, false, None);
-        assert!(staged.contains("真实删除"));
-        let confirm = DeleteConfirm {
-            expected_count: 2,
-            selected: None,
-            typed: String::new(),
-        };
-        let waiting = cleanup_next_hint(2, true, true, true, Some(&confirm));
-        assert!(waiting.contains("确认数量") || waiting.contains("DELETE"));
-        let ready = DeleteConfirm {
-            expected_count: 2,
-            selected: Some(DeleteConfirmToken::DeleteWord),
-            typed: String::new(),
-        };
-        let unlocked = cleanup_next_hint(2, true, true, true, Some(&ready));
-        assert!(unlocked.contains("确认并删除"));
+        let staged = cleanup_next_hint(2, true, None);
+        assert!(staged.contains("删除 2 条"));
+        let confirm = DeleteConfirm { expected_count: 2 };
+        let waiting = cleanup_next_hint(2, true, Some(&confirm));
+        assert!(waiting.contains("确认删除"));
+        assert!(!waiting.contains("DELETE"));
     }
 
     #[test]
-    fn delete_confirm_requires_count_or_delete_word() {
-        let empty = DeleteConfirm {
-            expected_count: 0,
-            selected: Some(DeleteConfirmToken::DeleteWord),
-            typed: String::new(),
-        };
-        assert!(!delete_confirm_ready(&empty));
-
-        let unselected = DeleteConfirm {
-            expected_count: 3,
-            selected: None,
-            typed: String::new(),
-        };
-        assert!(!delete_confirm_ready(&unselected));
-
-        let by_count = DeleteConfirm {
-            expected_count: 3,
-            selected: Some(DeleteConfirmToken::Count),
-            typed: String::new(),
-        };
-        assert!(delete_confirm_ready(&by_count));
-
-        let by_word = DeleteConfirm {
-            expected_count: 3,
-            selected: Some(DeleteConfirmToken::DeleteWord),
-            typed: String::new(),
-        };
-        assert!(delete_confirm_ready(&by_word));
-
-        let typed_word = DeleteConfirm {
-            expected_count: 3,
-            selected: None,
-            typed: "delete".into(),
-        };
-        assert!(delete_confirm_ready(&typed_word));
-
-        let typed_count = DeleteConfirm {
-            expected_count: 3,
-            selected: None,
-            typed: "3".into(),
-        };
-        assert!(delete_confirm_ready(&typed_count));
-
-        let typed_wrong = DeleteConfirm {
-            expected_count: 3,
-            selected: None,
-            typed: "2".into(),
-        };
-        assert!(!delete_confirm_ready(&typed_wrong));
+    fn delete_confirm_is_ready_when_count_is_positive() {
+        assert!(!delete_confirm_ready(&DeleteConfirm { expected_count: 0 }));
+        assert!(delete_confirm_ready(&DeleteConfirm { expected_count: 3 }));
     }
 
     #[test]
@@ -2593,10 +2458,8 @@ mod tests {
         assert!(!LayoutMode::Medium.filter_as_overlay());
         assert!(LayoutMode::Medium.inspector_as_overlay());
         assert!(!LayoutMode::Medium.tweet_list_as_cards());
-        assert!(!LayoutMode::Medium.stack_cleanup_steps());
         assert!(LayoutMode::Narrow.filter_as_overlay());
         assert!(LayoutMode::Narrow.inspector_as_overlay());
         assert!(LayoutMode::Narrow.tweet_list_as_cards());
-        assert!(LayoutMode::Narrow.stack_cleanup_steps());
     }
 }

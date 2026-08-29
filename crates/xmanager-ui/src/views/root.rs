@@ -1,8 +1,7 @@
 //! Application shell and the three product routes.
 
 use crate::app::{
-    cleanup_next_hint, resolve_focused_tweet, tweet_preview_label, AppState, DeleteConfirmToken,
-    ExportFormat, Route,
+    cleanup_next_hint, resolve_focused_tweet, tweet_preview_label, AppState, ExportFormat, Route,
 };
 use crate::theme::{self, space};
 use crate::views::{status_bar, toolbar, tweet_list};
@@ -928,23 +927,12 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
             ))
     });
     let has_candidates = !state.loading && !candidate_ids.is_empty();
-    let can_preview_delete = has_candidates;
     let can_open_delete_confirm = has_candidates;
     let confirm = state.delete_confirm.as_ref();
-    let confirm_ready = state.delete_confirm_is_ready();
     let expected_count = confirm
         .map(|c| c.expected_count)
         .unwrap_or(candidate_ids.len());
-    let selected_token = confirm.and_then(|c| c.selected);
-    let typed_confirm = confirm.map(|c| c.typed.as_str()).unwrap_or("").to_string();
-    let typed_empty = typed_confirm.is_empty();
-    let next_hint = cleanup_next_hint(
-        candidate_ids.len(),
-        state.credentials_ok,
-        state.has_valid_backup(),
-        state.has_valid_preview(),
-        confirm,
-    );
+    let next_hint = cleanup_next_hint(candidate_ids.len(), state.credentials_ok, confirm);
     div()
         .flex()
         .flex_col()
@@ -953,34 +941,6 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .p(px(space::LG))
         .gap(px(space::LG))
         .child(page_heading("安全清理", next_hint))
-        .child({
-            let stacked = state.layout_mode.stack_cleanup_steps();
-            let steps = if stacked {
-                div().flex().flex_col().gap_2()
-            } else {
-                div().flex().flex_row().flex_wrap().gap_2()
-            };
-            steps
-                .child(step_card(
-                    "1",
-                    "加入候选",
-                    !candidate_ids.is_empty(),
-                    stacked,
-                ))
-                .child(step_card(
-                    "2",
-                    "自动备份与预演",
-                    state.has_valid_backup() && state.has_valid_preview(),
-                    stacked,
-                ))
-                .child(step_card("3", "二次确认", confirm.is_some(), stacked))
-                .child(step_card(
-                    "4",
-                    "确认并删除",
-                    can_open_delete_confirm && confirm_ready,
-                    stacked,
-                ))
-        })
         .child(
             div()
                 .flex()
@@ -994,9 +954,9 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(danger_btn(
                     "delete-cleanup",
                     if confirm.is_some() {
-                        "继续确认…"
+                        "继续确认…".to_string()
                     } else {
-                        "真实删除"
+                        format!("删除 {} 条", candidate_ids.len())
                     },
                     can_open_delete_confirm,
                     cx.listener(|this, _, window, cx| this.delete_previewed(window, cx)),
@@ -1020,10 +980,9 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(section_label("可选"))
                 .child(
                     theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
-                        .child("主按钮已包含备份和预演，以下仅在需要单独导出或复查时使用。"),
+                        .child("删除会自动备份到 exports/。需要时也可另存一份。"),
                 )
                 .child(btn(
                     "backup-csv",
@@ -1042,13 +1001,6 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     cx.listener(|this, _, window, cx| {
                         this.export_candidates(ExportFormat::Json, window, cx)
                     }),
-                ))
-                .child(btn(
-                    "preview-cleanup",
-                    "只预演不删除",
-                    false,
-                    can_preview_delete,
-                    cx.listener(|this, _, window, cx| this.preview_selected(window, cx)),
                 )),
         )
         .when_some(state.preview_outcome.as_ref(), |el, outcome| {
@@ -1219,102 +1171,14 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(theme::c(theme::DANGER))
                             .child(format!(
-                                "二次确认：将永久删除 {expected_count} 条候选，操作不可恢复"
+                                "将永久删除 {expected_count} 条候选，此操作不可恢复"
                             )),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(theme::c(theme::TEXT_MUTED))
-                            .child("可点 chip，或输入确切数量 / DELETE"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .gap_2()
-                            .child(toggle_chip(
-                                "delete-confirm-count",
-                                format!("确认数量 {expected_count}"),
-                                selected_token == Some(DeleteConfirmToken::Count),
-                                cx.listener(|this, _, _window, cx| {
-                                    this.select_delete_confirm_token(DeleteConfirmToken::Count, cx)
-                                }),
-                            ))
-                            .child(toggle_chip(
-                                "delete-confirm-delete",
-                                "DELETE",
-                                selected_token == Some(DeleteConfirmToken::DeleteWord),
-                                cx.listener(|this, _, _window, cx| {
-                                    this.select_delete_confirm_token(
-                                        DeleteConfirmToken::DeleteWord,
-                                        cx,
-                                    )
-                                }),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .id("delete-confirm-typed")
-                                    .flex()
-                                    .flex_1()
-                                    .items_center()
-                                    .min_h(px(30.))
-                                    .px_2()
-                                    .rounded_md()
-                                    .bg(theme::c(theme::BG))
-                                    .border_1()
-                                    .border_color(theme::c(theme::BORDER_STRONG))
-                                    .tab_index(0)
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, _window, cx| {
-                                            let key = event.keystroke.key.as_str();
-                                            if key == "backspace" || key == "delete" {
-                                                this.backspace_delete_confirm(cx);
-                                                cx.stop_propagation();
-                                            } else if let Some(ch) =
-                                                event.keystroke.key_char.as_deref()
-                                            {
-                                                if ch.chars().any(|c| !c.is_control()) {
-                                                    this.push_delete_confirm_text(ch, cx);
-                                                    cx.stop_propagation();
-                                                }
-                                            }
-                                        },
-                                    ))
-                                    .child(
-                                        theme::type_mono(div().text_color(theme::c(
-                                            if typed_empty {
-                                                theme::TEXT_MUTED
-                                            } else {
-                                                theme::TEXT
-                                            },
-                                        )))
-                                        .child(
-                                            if typed_empty {
-                                                "输入数量或 DELETE".to_string()
-                                            } else {
-                                                typed_confirm.clone()
-                                            },
-                                        ),
-                                    ),
-                            )
-                            .child(btn(
-                                "delete-confirm-backspace",
-                                "退格",
-                                false,
-                                !state.loading && !typed_empty,
-                                cx.listener(|this, _, _window, cx| {
-                                    this.backspace_delete_confirm(cx)
-                                }),
-                            )),
+                            .child("备份已写入 exports/。点确认后才会向 X 提交删除。"),
                     )
                     .child(
                         div()
@@ -1323,7 +1187,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                             .gap_2()
                             .child(danger_btn(
                                 "delete-confirm-execute",
-                                "确认并删除",
+                                format!("确认删除 {expected_count} 条"),
                                 !state.loading,
                                 cx.listener(|this, _, window, cx| {
                                     this.confirm_and_delete(window, cx)
@@ -1374,41 +1238,6 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .children(rows)
                 .into_any_element()
         })
-}
-
-fn step_card(number: &str, label: &str, done: bool, stacked: bool) -> Div {
-    surface_card(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(space::SM))
-            .px(px(space::MD))
-            .py(px(space::SM))
-            .when(stacked, |el| el.w_full()),
-    )
-    .bg(if done {
-        theme::c(theme::CHIP_ACTIVE)
-    } else {
-        theme::c(theme::BG_ELEVATED)
-    })
-    .child(
-        div()
-            .text_sm()
-            .font_weight(gpui::FontWeight::BOLD)
-            .child(number.to_string()),
-    )
-    .child(div().text_sm().child(label.to_string()))
-    .child(
-        div()
-            .text_xs()
-            .text_color(if done {
-                theme::c(theme::SUCCESS)
-            } else {
-                theme::c(theme::TEXT_DIM)
-            })
-            .child(if done { "完成" } else { "待处理" }),
-    )
 }
 
 pub fn render_root(state: &AppState, cx: &mut Context<AppState>) -> impl gpui::IntoElement {
