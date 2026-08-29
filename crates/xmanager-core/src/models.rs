@@ -19,6 +19,13 @@ pub struct PublicMetrics {
     pub impression_count: u64,
 }
 
+/// User-context metrics (`tweet.fields=non_public_metrics`). Optional; omitted on many payloads.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NonPublicMetrics {
+    #[serde(default)]
+    pub impression_count: u64,
+}
+
 /// Classification of a post for filtering / display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +69,9 @@ pub struct Tweet {
     pub created_at: Option<String>,
     #[serde(default)]
     pub public_metrics: PublicMetrics,
+    /// Present only when the API returns user-context `non_public_metrics`.
+    #[serde(default)]
+    pub non_public_metrics: NonPublicMetrics,
     #[serde(default)]
     pub conversation_id: Option<String>,
     #[serde(default)]
@@ -76,18 +86,20 @@ pub struct Tweet {
 
 impl Tweet {
     /// Impression / view count (曝光).
+    ///
+    /// Prefer a real (`> 0`) `impression_count` from user-context
+    /// `non_public_metrics`, then `public_metrics`. Missing objects stay 0.
     pub fn views(&self) -> u64 {
-        self.public_metrics.impression_count
+        coalesce_impression_count(
+            self.public_metrics.impression_count,
+            self.non_public_metrics.impression_count,
+        )
     }
 
     /// Sum of likes, retweets, replies, quotes, and bookmarks.
     pub fn engagement(&self) -> u64 {
         let m = &self.public_metrics;
-        m.like_count
-            + m.retweet_count
-            + m.reply_count
-            + m.quote_count
-            + m.bookmark_count
+        m.like_count + m.retweet_count + m.reply_count + m.quote_count + m.bookmark_count
     }
 
     /// True if this tweet is a reply to another user.
@@ -164,6 +176,15 @@ fn rate(num: u64, views: u64) -> f64 {
     num as f64 / denom
 }
 
+/// Prefer a non-zero user-context impression count, else the public one.
+pub fn coalesce_impression_count(public: u64, non_public: u64) -> u64 {
+    if non_public > 0 {
+        non_public
+    } else {
+        public
+    }
+}
+
 /// Authenticated user profile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct User {
@@ -190,6 +211,7 @@ mod tests {
                 bookmark_count: 1,
                 impression_count: 100,
             },
+            non_public_metrics: NonPublicMetrics::default(),
             conversation_id: None,
             in_reply_to_user_id: None,
             is_retweet: false,
@@ -210,6 +232,7 @@ mod tests {
             text: "RT @x: hi".into(),
             created_at: None,
             public_metrics: PublicMetrics::default(),
+            non_public_metrics: NonPublicMetrics::default(),
             conversation_id: None,
             in_reply_to_user_id: Some("9".into()),
             is_retweet: true,
@@ -220,5 +243,40 @@ mod tests {
         assert_eq!(t.kind(), PostKind::Reply);
         t.in_reply_to_user_id = None;
         assert_eq!(t.kind(), PostKind::Quote);
+    }
+
+    #[test]
+    fn views_prefers_nonzero_non_public_impression() {
+        let mut t = Tweet {
+            id: "1".into(),
+            text: "hi".into(),
+            created_at: None,
+            public_metrics: PublicMetrics::default(),
+            non_public_metrics: NonPublicMetrics::default(),
+            conversation_id: None,
+            in_reply_to_user_id: None,
+            is_retweet: false,
+            is_quote: false,
+        };
+        assert_eq!(t.views(), 0);
+        t.public_metrics.impression_count = 40;
+        assert_eq!(t.views(), 40);
+        t.non_public_metrics.impression_count = 90;
+        assert_eq!(t.views(), 90);
+        t.public_metrics.impression_count = 0;
+        assert_eq!(t.views(), 90);
+        t.non_public_metrics.impression_count = 0;
+        assert_eq!(t.views(), 0);
+        assert_eq!(coalesce_impression_count(12, 0), 12);
+        assert_eq!(coalesce_impression_count(0, 7), 7);
+        assert_eq!(coalesce_impression_count(12, 7), 7);
+    }
+
+    #[test]
+    fn tweet_deserializes_without_metrics_objects() {
+        let t: Tweet = serde_json::from_str(r#"{"id":"9","text":"x"}"#).unwrap();
+        assert_eq!(t.views(), 0);
+        assert_eq!(t.public_metrics.impression_count, 0);
+        assert_eq!(t.non_public_metrics.impression_count, 0);
     }
 }

@@ -3,7 +3,7 @@
 use crate::config::Settings;
 use crate::error::{Error, Result};
 use crate::logging::{self, events, Outcome, Stream};
-use crate::models::{PublicMetrics, Tweet, User};
+use crate::models::{NonPublicMetrics, PublicMetrics, Tweet, User};
 use oauth1_request as oauth;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT};
@@ -14,8 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BASE_URL: &str = "https://api.x.com/2";
 const BASE_URL_FALLBACK: &str = "https://api.twitter.com/2";
-const TWEET_FIELDS: &str =
-    "created_at,public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets";
+const TWEET_FIELDS: &str = "created_at,public_metrics,non_public_metrics,conversation_id,in_reply_to_user_id,referenced_tweets";
 
 /// Live tweet lookup result (`GET /2/tweets?ids=`).
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -178,8 +177,7 @@ impl XClient {
         exclude_replies: bool,
     ) -> Result<(User, Vec<Tweet>)> {
         let me = self.get_me()?;
-        let tweets =
-            self.fetch_user_tweets(&me.id, limit, exclude_retweets, exclude_replies)?;
+        let tweets = self.fetch_user_tweets(&me.id, limit, exclude_retweets, exclude_replies)?;
         Ok((me, tweets))
     }
 
@@ -201,11 +199,7 @@ impl XClient {
         match deleted_flag(&data) {
             Ok(deleted) => {
                 logging::info(Stream::Audit, events::TWEET_DELETE)
-                    .outcome(if deleted {
-                        Outcome::Ok
-                    } else {
-                        Outcome::Error
-                    })
+                    .outcome(if deleted { Outcome::Ok } else { Outcome::Error })
                     .field("tweet_id", tweet_id)
                     .field("deleted", deleted)
                     .emit();
@@ -315,6 +309,36 @@ impl XClient {
         params: &BTreeMap<String, String>,
         allow_partial_errors: bool,
     ) -> Result<Value> {
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            match self.request_json_attempt(method, url, params, allow_partial_errors) {
+                Ok(value) => return Ok(value),
+                Err(err) if is_transient_http(&err) && attempt < MAX_ATTEMPTS => {
+                    let backoff_ms = 250 * (1 << (attempt - 1));
+                    logging::warn(Stream::App, events::API_REQUEST)
+                        .outcome(Outcome::Error)
+                        .field("http_method", method)
+                        .field("url", logging::sanitize_url(url))
+                        .field("error", err.to_string())
+                        .field("retry_attempt", attempt)
+                        .field("backoff_ms", backoff_ms)
+                        .emit();
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn request_json_attempt(
+        &self,
+        method: &str,
+        url: &str,
+        params: &BTreeMap<String, String>,
+        allow_partial_errors: bool,
+    ) -> Result<Value> {
         let started = Instant::now();
         let response = match self.send(method, url, params) {
             Ok(response) => response,
@@ -342,9 +366,7 @@ impl XClient {
         }
 
         let status = response.status();
-        let body = response
-            .text()
-            .map_err(|e| Error::Network(e.to_string()))?;
+        let body = response.text().map_err(|e| Error::Network(e.to_string()))?;
         let duration_ms = started.elapsed().as_millis() as u64;
         let url_path = logging::sanitize_url(url);
 
@@ -426,12 +448,7 @@ impl XClient {
         Ok(data)
     }
 
-    fn send(
-        &self,
-        method: &str,
-        url: &str,
-        params: &BTreeMap<String, String>,
-    ) -> Result<Response> {
+    fn send(&self, method: &str, url: &str, params: &BTreeMap<String, String>) -> Result<Response> {
         let mut last_network = None;
         for candidate in candidate_urls(url) {
             match self.send_once(method, &candidate, params) {
@@ -528,12 +545,7 @@ fn sign_oauth1(
     token_secret: &str,
 ) -> Result<String> {
     // `uri` must not contain a query part — params go into the Request object.
-    let oauth_token = oauth::Token::from_parts(
-        consumer_key,
-        consumer_secret,
-        token,
-        token_secret,
-    );
+    let oauth_token = oauth::Token::from_parts(consumer_key, consumer_secret, token, token_secret);
 
     // ParameterList sorts keys for a correct signature base string.
     let pairs: Vec<(&str, &str)> = params
@@ -592,6 +604,13 @@ fn format_api_error(data: &Value, status: u16) -> String {
     let mut parts = vec![format!("HTTP {status}")];
     if status == 429 {
         parts.push("触发速率限制，请稍后重试".into());
+    } else if status == 401 {
+        parts.push("认证失败，请核对 Consumer Key 与 User Access Token 是否填反".into());
+    } else if status == 403 {
+        parts.push(
+            "权限不足，请确认按量付费开通，以及 Token 为 Read and write（改权限后需重新生成）"
+                .into(),
+        );
     }
     if let Some(t) = title {
         parts.push(t.to_string());
@@ -608,6 +627,11 @@ fn format_api_error(data: &Value, status: u16) -> String {
 fn parse_tweet(item: &Value) -> Result<Tweet> {
     let metrics_raw = item.get("public_metrics").cloned().unwrap_or(Value::Null);
     let metrics: PublicMetrics = serde_json::from_value(metrics_raw).unwrap_or_default();
+    let non_public_raw = item
+        .get("non_public_metrics")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let non_public: NonPublicMetrics = serde_json::from_value(non_public_raw).unwrap_or_default();
     let (is_retweet, is_quote) = parse_referenced_flags(item);
     Ok(Tweet {
         id: json_str(item, "id")?,
@@ -621,6 +645,7 @@ fn parse_tweet(item: &Value) -> Result<Tweet> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         public_metrics: metrics,
+        non_public_metrics: non_public,
         conversation_id: item
             .get("conversation_id")
             .and_then(|v| v.as_str())
@@ -632,6 +657,14 @@ fn parse_tweet(item: &Value) -> Result<Tweet> {
         is_retweet,
         is_quote,
     })
+}
+
+fn is_transient_http(err: &Error) -> bool {
+    match err {
+        Error::Network(_) => true,
+        Error::Api { status, .. } if (500..=504).contains(status) => true,
+        _ => false,
+    }
 }
 
 /// Read `referenced_tweets` for retweeted / quoted flags.
@@ -824,6 +857,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_tweet_uses_non_public_impression_when_public_missing() {
+        let item = json!({
+            "id": "7",
+            "text": "views from user context",
+            "non_public_metrics": { "impression_count": 88 }
+        });
+        let tweet = parse_tweet(&item).expect("parse tweet");
+        assert_eq!(tweet.views(), 88);
+        assert_eq!(tweet.public_metrics.impression_count, 0);
+        assert_eq!(tweet.non_public_metrics.impression_count, 88);
+    }
+
+    #[test]
+    fn parse_tweet_tolerates_absent_metrics() {
+        let item = json!({ "id": "8", "text": "no metrics" });
+        let tweet = parse_tweet(&item).expect("parse tweet");
+        assert_eq!(tweet.views(), 0);
+    }
+
+    #[test]
     fn parse_referenced_flags_detects_retweet() {
         let item = json!({
             "referenced_tweets": [
@@ -848,6 +901,47 @@ mod tests {
         assert!(msg.contains("HTTP 429"));
         assert!(msg.contains("速率限制"));
         assert!(msg.contains("Too Many Requests"));
+    }
+
+    #[test]
+    fn format_api_error_mentions_key_mixup_on_401() {
+        let msg = format_api_error(&json!({ "title": "Unauthorized" }), 401);
+        assert!(msg.contains("HTTP 401"));
+        assert!(msg.contains("填反"));
+        let facing = Error::api(401, msg).user_facing();
+        assert!(facing.contains("console.x.com"), "{facing}");
+        assert!(facing.contains("X_API_KEY"), "{facing}");
+    }
+
+    #[test]
+    fn format_api_error_mentions_permissions_on_403() {
+        let msg = format_api_error(&json!({ "title": "Forbidden" }), 403);
+        assert!(msg.contains("Read and write"));
+        let facing = Error::api(403, msg).user_facing();
+        assert!(
+            facing.contains("按量付费") || facing.contains("pay-per-use"),
+            "{facing}"
+        );
+    }
+
+    #[test]
+    fn transient_http_retries_5xx_and_network_not_401() {
+        assert!(is_transient_http(&Error::api(503, "down")));
+        assert!(is_transient_http(&Error::Network("reset".into())));
+        assert!(!is_transient_http(&Error::api(401, "nope")));
+        assert!(!is_transient_http(&Error::RateLimited {
+            retry_after_secs: 90
+        }));
+    }
+
+    #[test]
+    fn rate_limited_user_facing_does_not_ask_to_sleep() {
+        let facing = Error::RateLimited {
+            retry_after_secs: 400,
+        }
+        .user_facing();
+        assert!(facing.contains("400"));
+        assert!(facing.contains("不会自动"));
     }
 
     #[test]
@@ -968,4 +1062,3 @@ mod tests {
         })));
     }
 }
-

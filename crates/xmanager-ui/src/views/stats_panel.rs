@@ -1,7 +1,7 @@
 //! Summary stats cards and view histogram bars.
 
 use crate::app::AppState;
-use crate::theme;
+use crate::theme::{self, space};
 use crate::widgets::{section_label, stat_card};
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use xmanager_core::Tweet;
@@ -26,11 +26,13 @@ pub fn render_stats_panel(state: &AppState, cx: &mut Context<AppState>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap_2()
-        .p_3()
+        .gap(px(space::MD))
+        .p(px(space::MD))
         .bg(theme::c(theme::BG_PANEL))
-        .border_t_1()
+        .border_1()
         .border_color(theme::c(theme::BORDER))
+        .rounded(px(theme::radius::LG))
+        .shadow_sm()
         .child(section_label(format!(
             "统计 · {range_label} · 按{sort_label}{order_label}"
         )))

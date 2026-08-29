@@ -1,8 +1,8 @@
 //! Virtualized tweet list with checkbox selection, kind & rates.
 
-use crate::app::AppState;
-use crate::theme;
-use crate::widgets::{btn, checkbox_mark, kind_color, truncate_text};
+use crate::app::{chip_label, library_empty_copy, AppState, LibraryEmptyKind};
+use crate::theme::{self, space};
+use crate::widgets::{btn, checkbox_mark, empty_mark, kind_color, removable_chip, truncate_text};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window};
 use xmanager_core::{SortField, SortOrder, Tweet};
 
@@ -16,17 +16,18 @@ const COL_LIKE_R: f32 = 56.0;
 const COL_BM_R: f32 = 56.0;
 const COL_ENG_R: f32 = 56.0;
 const CARD_ROW_H: f32 = 92.0;
-const TABLE_ROW_H: f32 = 40.0;
+const TABLE_ROW_H: f32 = 44.0;
 
 fn header_cell(label: &str, width: f32) -> Div {
-    div()
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(theme::c(theme::TEXT_MUTED))
-        .child(label.to_string())
+    theme::type_meta(
+        div()
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(theme::c(theme::TEXT_MUTED)),
+    )
+    .child(label.to_string())
 }
 
 fn sort_header(
@@ -44,42 +45,44 @@ fn sort_header(
     } else {
         " ↓"
     };
-    div()
-        .id(SharedString::from(format!("sort-header-{label}")))
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .font_weight(if active {
-            gpui::FontWeight::SEMIBOLD
-        } else {
-            gpui::FontWeight::MEDIUM
-        })
-        .text_color(if active {
-            theme::c(theme::ACCENT)
-        } else {
-            theme::c(theme::TEXT_MUTED)
-        })
-        .cursor_pointer()
-        .hover(|s| s.text_color(theme::c(theme::TEXT)))
-        .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx)))
-        .child(format!("{label}{arrow}"))
+    theme::type_meta(
+        div()
+            .id(SharedString::from(format!("sort-header-{label}")))
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .font_weight(if active {
+                gpui::FontWeight::SEMIBOLD
+            } else {
+                gpui::FontWeight::MEDIUM
+            })
+            .text_color(if active {
+                theme::c(theme::ACCENT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            })
+            .cursor_pointer()
+            .hover(|s| s.text_color(theme::c(theme::TEXT)))
+            .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx))),
+    )
+    .child(format!("{label}{arrow}"))
 }
 
 fn cell(text: impl Into<SharedString>, width: f32, muted: bool) -> Div {
-    div()
-        .w(px(width))
-        .flex_none()
-        .px_1()
-        .text_sm()
-        .text_color(if muted {
-            theme::c(theme::TEXT_MUTED)
-        } else {
-            theme::c(theme::TEXT)
-        })
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .child(text.into())
+    theme::type_body(
+        div()
+            .w(px(width))
+            .flex_none()
+            .px(px(space::SM))
+            .text_color(if muted {
+                theme::c(theme::TEXT_MUTED)
+            } else {
+                theme::c(theme::TEXT)
+            })
+            .overflow_hidden()
+            .whitespace_nowrap(),
+    )
+    .child(text.into())
 }
 
 fn row_bg(focused: bool, selected: bool, ix: usize) -> gpui::Rgba {
@@ -121,9 +124,9 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex()
         .flex_row()
         .items_center()
-        .h(px(36.))
-        .px_2()
-        .bg(theme::c(theme::BG_ELEVATED))
+        .h(px(40.))
+        .px(px(space::SM))
+        .bg(theme::c(theme::BG_PANEL))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
         .child(header_cell("", COL_CHECK))
@@ -131,18 +134,43 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
         .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
         .child(sort_header("赞", COL_LIKES, SortField::LikeRate, state, cx))
-        .child(sort_header("藏", COL_BM, SortField::BookmarkRate, state, cx))
-        .child(sort_header("赞率", COL_LIKE_R, SortField::LikeRate, state, cx))
-        .child(sort_header("藏率", COL_BM_R, SortField::BookmarkRate, state, cx))
-        .child(sort_header("互率", COL_ENG_R, SortField::EngagementRate, state, cx))
+        .child(sort_header(
+            "藏",
+            COL_BM,
+            SortField::BookmarkRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "赞率",
+            COL_LIKE_R,
+            SortField::LikeRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "藏率",
+            COL_BM_R,
+            SortField::BookmarkRate,
+            state,
+            cx,
+        ))
+        .child(sort_header(
+            "互率",
+            COL_ENG_R,
+            SortField::EngagementRate,
+            state,
+            cx,
+        ))
         .child(
-            div()
-                .flex_1()
-                .px_1()
-                .text_xs()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(theme::c(theme::TEXT_MUTED))
+            div().flex_1().px(px(space::SM)).child(
+                theme::type_meta(
+                    div()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(theme::c(theme::TEXT_MUTED)),
+                )
                 .child("内容"),
+            ),
         )
 }
 
@@ -211,119 +239,123 @@ fn first_load_skeleton(title: &'static str, detail: &'static str) -> Div {
             div()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .px_4()
-                .py_3()
+                .gap(px(space::XS))
+                .px(px(space::LG))
+                .py(px(space::MD))
+                .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(title))
                 .child(
-                    div()
-                        .text_sm()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(theme::c(theme::TEXT))
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme::c(theme::TEXT_MUTED))
-                        .child(detail),
+                    theme::type_body(div().text_color(theme::c(theme::TEXT_MUTED))).child(detail),
                 ),
         )
         .children((0..8).map(skeleton_row))
 }
 
 fn empty_state(state: &AppState, cx: &mut Context<AppState>) -> Div {
-    let first_load = state.loading && state.all_tweets.is_empty();
-    let (title, detail) = if first_load {
-        ("正在拉取…", "首次同步完成后会显示结果。")
-    } else if !state.credentials_ok {
-        (
-            "尚未配置凭证",
-            "请在项目根目录配置 .env（X_API_KEY 等），然后点击「刷新状态」。",
-        )
-    } else if state.all_tweets.is_empty() {
-        (
-            "暂无数据",
-            "先拉取你的推文，再按曝光、类型或时间筛选。刷新时会保留当前列表。",
-        )
-    } else {
-        (
-            "没有匹配结果",
-            "当前筛选条件下为空。可清除条件，或打开筛选抽屉继续收窄。",
-        )
-    };
-    if first_load {
-        return first_load_skeleton(title, detail);
+    let copy = library_empty_copy(
+        state.loading,
+        state.all_tweets.len(),
+        state.filtered.len(),
+        state.last_synced_at.is_some(),
+        state.last_fetch_failed,
+        state.credential_layout,
+    );
+    if copy.kind == LibraryEmptyKind::Loading {
+        return first_load_skeleton("正在拉取…", "首次同步完成后会显示结果。");
     }
-    let no_creds = !state.credentials_ok;
-    let no_data = state.credentials_ok && state.all_tweets.is_empty();
-    let no_match = !state.all_tweets.is_empty();
+    let need_refresh = matches!(
+        copy.kind,
+        LibraryEmptyKind::CredentialsMissing | LibraryEmptyKind::CredentialsSwapped
+    );
+    let need_fetch = matches!(
+        copy.kind,
+        LibraryEmptyKind::NeverSynced
+            | LibraryEmptyKind::FetchFailed
+            | LibraryEmptyKind::AccountEmpty
+    );
+    let no_match = copy.kind == LibraryEmptyKind::FilteredEmpty;
+    let enabled = !state.loading;
+    let chip_els: Vec<_> = if no_match {
+        state
+            .applied_chips()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, chip)| {
+                let label = chip_label(&chip);
+                removable_chip(
+                    format!("empty-chip-{idx}"),
+                    label,
+                    enabled,
+                    cx.listener(move |this, _, _window, cx| {
+                        this.remove_applied_chip(chip.clone(), cx);
+                    }),
+                )
+                .into_any_element()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let has_chips = !chip_els.is_empty();
     div()
         .flex()
         .flex_col()
         .flex_1()
         .items_center()
         .justify_center()
-        .gap_3()
-        .px_6()
+        .gap(px(space::MD))
+        .px(px(space::XL))
+        .child(empty_mark(copy.kind.mark()))
+        .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(copy.title))
         .child(
-            div()
-                .text_sm()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(theme::c(theme::TEXT))
-                .child(title),
+            theme::type_body(
+                div()
+                    .max_w(px(440.))
+                    .text_color(theme::c(theme::TEXT_MUTED)),
+            )
+            .child(copy.detail),
         )
-        .child(
-            div()
-                .max_w(px(420.))
-                .text_sm()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(detail),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap_2()
-                .when(no_creds, |el| {
-                    el.child(btn(
-                        "empty-refresh",
-                        "刷新状态",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
-                    ))
-                })
-                .when(no_data, |el| {
-                    el.child(btn(
-                        "empty-fetch",
-                        "拉取并分析",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| this.fetch_tweets(cx)),
-                    ))
-                })
-                .when(no_match, |el| {
-                    el.child(btn(
-                        "empty-clear-filters",
-                        "清除筛选",
-                        true,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| {
-                            this.filter_draft = crate::app::FilterDraft::unrestricted();
-                            this.apply_filters(cx);
-                            cx.notify();
-                        }),
-                    ))
-                    .child(btn(
-                        "empty-open-filters",
-                        "打开筛选",
-                        false,
-                        true,
-                        cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
-                    ))
+        .when(has_chips, |el| {
+            el.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .justify_center()
+                    .gap(px(space::SM))
+                    .children(chip_els),
+            )
+        })
+        .when(need_refresh, |el| {
+            el.child(btn(
+                "empty-refresh",
+                "刷新状态",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
+            ))
+        })
+        .when(need_fetch, |el| {
+            el.child(btn(
+                "empty-fetch",
+                "拉取并分析",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| this.fetch_tweets(cx)),
+            ))
+        })
+        .when(no_match, |el| {
+            el.child(btn(
+                "empty-clear-filters",
+                "清除筛选",
+                true,
+                !state.loading,
+                cx.listener(|this, _, _window, cx| {
+                    this.filter_draft = crate::app::FilterDraft::unrestricted();
+                    this.apply_filters(cx);
+                    cx.notify();
                 }),
-        )
+            ))
+        })
 }
 
 fn row_checkbox(id: String, selected: bool, cx: &mut Context<AppState>) -> impl IntoElement {
@@ -367,7 +399,7 @@ fn tweet_table_row(
         .flex_row()
         .items_center()
         .h(px(TABLE_ROW_H))
-        .px_2()
+        .px(px(space::SM))
         .bg(row_bg(focused, selected, ix))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
@@ -378,14 +410,15 @@ fn tweet_table_row(
         }))
         .child(row_checkbox(id, selected, cx))
         .child(
-            div()
-                .w(px(COL_KIND))
-                .flex_none()
-                .px_1()
-                .text_xs()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(kind_color(kind))
-                .child(kind.short()),
+            theme::type_meta(
+                div()
+                    .w(px(COL_KIND))
+                    .flex_none()
+                    .px(px(space::SM))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(kind_color(kind)),
+            )
+            .child(kind.short()),
         )
         .child(cell(date, COL_DATE, true))
         .child(cell(format!("{views}"), COL_VIEWS, false))
@@ -395,15 +428,15 @@ fn tweet_table_row(
         .child(cell(bm_r, COL_BM_R, false))
         .child(cell(eng_r, COL_ENG_R, false))
         .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .px_1()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT))
-                .overflow_hidden()
-                .whitespace_nowrap()
+            div().flex_1().min_w(px(0.)).px(px(space::SM)).child(
+                theme::type_body(
+                    div()
+                        .text_color(theme::c(theme::TEXT))
+                        .overflow_hidden()
+                        .whitespace_nowrap(),
+                )
                 .child(text_preview),
+            ),
         )
 }
 
@@ -429,9 +462,9 @@ fn tweet_card_row(
         .flex_row()
         .items_start()
         .h(px(CARD_ROW_H))
-        .px_2()
-        .py_2()
-        .gap_1()
+        .px(px(space::MD))
+        .py(px(space::SM))
+        .gap(px(space::SM))
         .bg(row_bg(focused, selected, ix))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))

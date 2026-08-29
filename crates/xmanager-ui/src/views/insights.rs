@@ -1,8 +1,8 @@
 //! Insights page: KPI cards, view histogram, Top-N ranking, and rank presets.
 
 use crate::app::{AppState, ExportFormat, Route};
-use crate::theme;
-use crate::widgets::{btn, kind_color, page_heading, section_label, truncate_text};
+use crate::theme::{self, space};
+use crate::widgets::{btn, kind_color, page_heading, section_label, surface_card, truncate_text};
 use gpui::{div, prelude::*, px, Context, Div, SharedString};
 use xmanager_core::{SortField, SortOrder, TimeRange, Tweet};
 
@@ -22,8 +22,8 @@ pub fn render_insights(state: &AppState, cx: &mut Context<AppState>) -> impl gpu
         .flex_1()
         .min_h(px(0.))
         .overflow_y_scroll()
-        .p_4()
-        .gap_3()
+        .p(px(space::LG))
+        .gap(px(space::LG))
         .child(
             div()
                 .flex()
@@ -185,13 +185,7 @@ fn render_rank_list(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .text_color(theme::c(theme::TEXT_MUTED))
                 .child("当前筛选没有可排名的推文")
         } else {
-            div()
-                .flex()
-                .flex_col()
-                .bg(theme::c(theme::BG_PANEL))
-                .border_1()
-                .border_color(theme::c(theme::BORDER))
-                .rounded_md()
+            surface_card(div().flex().flex_col())
                 .child(
                     div()
                         .flex()

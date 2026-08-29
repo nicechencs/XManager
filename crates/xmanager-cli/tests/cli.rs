@@ -47,9 +47,7 @@ fn creds_missing_with_empty_env_file() {
     std::fs::write(&env_path, "").unwrap();
 
     let mut cmd = bin();
-    cmd.env_clear()
-        .args(["creds", "--env"])
-        .arg(&env_path);
+    cmd.env_clear().args(["creds", "--env"]).arg(&env_path);
     let json = stdout_json(&mut cmd);
     assert_eq!(json["ok"], false);
     assert_eq!(json["code"], "missing_credentials");
@@ -69,15 +67,35 @@ fn creds_ok_from_env_file() {
     .unwrap();
 
     let mut cmd = bin();
-    cmd.env_clear()
-        .args(["creds", "--env"])
-        .arg(&env_path);
+    cmd.env_clear().args(["creds", "--env"]).arg(&env_path);
     let output = cmd.output().unwrap();
     assert!(output.status.success(), "{output:?}");
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["ok"], true);
     assert_eq!(json["oauth1"], true);
     assert_eq!(json["missing"], json!([]));
+    assert_eq!(json["layout"], "access_token_shape_missing");
+}
+
+#[test]
+fn creds_detects_swapped_access_token_in_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let env_path = dir.path().join("swapped.env");
+    std::fs::write(
+        &env_path,
+        "X_API_KEY=1234567890-ThisIsTheUserAccessToken\nX_API_SECRET=s\nX_ACCESS_TOKEN=consumerLookingKey\nX_ACCESS_TOKEN_SECRET=ts\n",
+    )
+    .unwrap();
+
+    let mut cmd = bin();
+    cmd.env_clear().args(["creds", "--env"]).arg(&env_path);
+    let json = stdout_json(&mut cmd);
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["code"], "swapped_credentials");
+    assert_eq!(json["layout"], "swapped");
+    let hint = json["hint"].as_str().unwrap_or("");
+    assert!(hint.contains("console.x.com"), "{hint}");
+    assert!(hint.contains("X_API_KEY"), "{hint}");
 }
 
 #[test]
@@ -177,8 +195,7 @@ fn export_writes_csv() {
 #[test]
 fn delete_is_dry_run_without_yes() {
     let mut cmd = bin();
-    cmd.env_clear()
-        .args(["delete", "--ids", "111,222"]);
+    cmd.env_clear().args(["delete", "--ids", "111,222"]);
     let json = stdout_json(&mut cmd);
     assert_eq!(json["ok"], true);
     assert_eq!(json["dry_run"], true);
@@ -239,7 +256,6 @@ fn offline_commands_write_structured_logs() {
 #[ignore]
 fn live_whoami() {
     bin().arg("whoami").assert().success().stdout(
-        predicate::str::contains("\"username\"")
-            .and(predicate::str::contains("\"ok\": true")),
+        predicate::str::contains("\"username\"").and(predicate::str::contains("\"ok\": true")),
     );
 }

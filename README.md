@@ -56,23 +56,32 @@ XManager/
 cp .env.example .env
 ```
 
-填写：
+打开 [https://console.x.com](https://console.x.com) → 选中 Project/App → **Keys and tokens**。新控制台生成后会把密钥藏起来，**Regenerate 只会再显示一次**。
 
-| 变量 | 说明 |
-|------|------|
-| `X_API_KEY` | Consumer Key |
-| `X_API_SECRET` | Consumer Secret |
-| `X_ACCESS_TOKEN` | User Access Token |
-| `X_ACCESS_TOKEN_SECRET` | User Access Token Secret |
-| `XMANAGER_LOG_DIR` | 可选，日志目录，默认 `logs` |
-| `XMANAGER_LOG_LEVEL` | 可选，`debug` / `info` / `warn` / `error`，默认 `info` |
+**控制台标签 ≠ `.env` 变量名。** 最常见翻车：把 User Access Token（以 `{user_id}-` 开头）贴进 `X_API_KEY` → HTTP 401，侧栏还可能只说「缺少凭证」或「已配置」。
+
+| 控制台位置 | 控台英文名 | 也可能写成 | 填入变量 | 长相 |
+|---|---|---|---|---|
+| console.x.com → 你的 App → Keys and tokens → OAuth 1.0a Keys → Consumer Key | Consumer Key / API Key | API Key | `X_API_KEY` | 约 25 位，**没有**「数字ID-」 |
+| 同页 Consumer Secret | Consumer Secret / API Key Secret | API Secret | `X_API_SECRET` | 较长一些 |
+| 同页 Access Token（For @yourhandle · Read and write） | Access Token | User Access Token | `X_ACCESS_TOKEN` | `{user_id}-....` |
+| 同页 Access Token Secret | Access Token Secret | | `X_ACCESS_TOKEN_SECRET` | 较长，没有数字 ID 前缀 |
+| App-only Bearer（可选，本工具不用） | Bearer Token | | `X_BEARER_TOKEN` | 很长 |
+
+还要同时满足：
+
+1. **User authentication = Read and write**，然后 **重新生成 Access Token**。只改权限、不重生，旧 Token 仍是只读。
+2. **按量付费（pay-per-use）额度** 开着，否则读自己的时间线会 403。
+3. 侧栏「凭证已配置」只检查四项是否非空，**不会联网 whoami**。点「刷新状态」才做一次真实校验。
+
+可选日志变量：`XMANAGER_LOG_DIR`（默认 `logs`）、`XMANAGER_LOG_LEVEL`（`debug` / `info` / `warn` / `error`）。
 
 ### Developer Portal 简要步骤
 
-1. 创建 Project + App  
-2. 开启 **Read and Write**  
-3. 生成 User Access Token / Secret  
-4. 将 Key/Secret/Token 写入 `.env`
+1. 打开 https://console.x.com → 选 Project + App → Keys and tokens  
+2. 开通按量付费访问  
+3. User authentication 设为 **Read and write**，再 **Regenerate** User Access Token  
+4. 按上表把 Consumer Key/Secret 与 Access Token/Secret **对号**写入 `.env`（不要交叉粘贴）
 
 ## 构建与运行
 
@@ -222,8 +231,9 @@ export_csv(&low, "exports/low.csv")?;
 ## 注意
 
 - **删除不可恢复**，务必先导出或 dry-run  
-- 注意 API 速率限制与费用  
-- `impression_count` 为展示次数，可能与网页统计略有差异  
+- 曝光优先读用户上下文的 `non_public_metrics.impression_count`，否则用 `public_metrics`；字段缺失时按 0，不中断解析  
+- 桌面端默认先筛「曝光 ≤ 50、不含回帖/转发」，便于找低曝光内容；筛选后若为 0 条，点芯片或「清除筛选」即可看到全部拉取结果  
+- 注意 API 速率限制与费用；429 时界面不会长时间卡住等待  
 - 诊断与删除审计写在 `logs/`（app 保留 14 天，audit 保留 90 天）；不含密钥与推文正文 
 
 ## License

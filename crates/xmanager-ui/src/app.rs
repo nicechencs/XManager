@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 
 use chrono::Local;
 use gpui::{AsyncApp, Context, SharedString, UniformListScrollHandle, WeakEntity, Window};
-use xmanager_core::logging::{self, events, artifact_file_stem, Outcome, Stream};
+use xmanager_core::logging::{self, artifact_file_stem, events, Outcome, Stream};
 use xmanager_core::{
     export_csv, export_json, filter_tweets, summarize, view_bucket_bounds, view_histogram,
-    FilterOptions, KindFilter, Settings, SortField, SortOrder, Summary, TimeRange, Tweet,
-    TweetLookup, User, XClient,
+    CredentialLayout, FilterOptions, KindFilter, Settings, SortField, SortOrder, Summary,
+    TimeRange, Tweet, TweetLookup, User, XClient,
 };
 
 /// Responsive shell breakpoints matching the guided-cleanup workspace spec.
@@ -339,10 +339,12 @@ pub fn tweet_preview_label(
     snapshot: &HashMap<String, Tweet>,
     all_tweets: &[Tweet],
 ) -> String {
-    let text = snapshot
-        .get(id)
-        .map(|t| t.text.as_str())
-        .or_else(|| all_tweets.iter().find(|t| t.id == id).map(|t| t.text.as_str()));
+    let text = snapshot.get(id).map(|t| t.text.as_str()).or_else(|| {
+        all_tweets
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.text.as_str())
+    });
     match text {
         Some(raw) => {
             let excerpt = raw.replace('\n', " ");
@@ -356,6 +358,123 @@ pub fn tweet_preview_label(
 
 pub fn cleanup_staging_notice(count: usize) -> String {
     format!("已加入安全清理（{count} 条）。可继续勾选，或前往安全清理。")
+}
+
+/// Default first-run scope: 曝光≤50、原创+引用. Documented so an empty table is not a surprise.
+pub fn is_default_cleanup_preset(filter: &FilterOptions) -> bool {
+    filter.max_views == Some(50)
+        && filter.min_views.is_none()
+        && filter.max_engagement.is_none()
+        && filter.older_than_days.is_none()
+        && filter.time_range == TimeRange::All
+        && filter.kinds.original
+        && !filter.kinds.reply
+        && !filter.kinds.retweet
+        && filter.kinds.quote
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibraryEmptyKind {
+    Loading,
+    CredentialsMissing,
+    CredentialsSwapped,
+    FetchFailed,
+    NeverSynced,
+    AccountEmpty,
+    FilteredEmpty,
+}
+
+impl LibraryEmptyKind {
+    /// Single-glyph mark for the illustration-free empty panel.
+    pub fn mark(self) -> &'static str {
+        match self {
+            Self::Loading => "…",
+            Self::CredentialsMissing => "钥",
+            Self::CredentialsSwapped => "换",
+            Self::FetchFailed => "!",
+            Self::NeverSynced => "↓",
+            Self::AccountEmpty => "空",
+            Self::FilteredEmpty => "筛",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryEmptyCopy {
+    pub kind: LibraryEmptyKind,
+    pub title: String,
+    pub detail: String,
+}
+
+/// Distinguish 无凭证 / 填反 / 拉取失败 / 真空 / 筛选后 0 条.
+pub fn library_empty_copy(
+    loading: bool,
+    tweet_count: usize,
+    filtered_count: usize,
+    last_synced: bool,
+    last_fetch_failed: bool,
+    layout: CredentialLayout,
+) -> LibraryEmptyCopy {
+    if loading && tweet_count == 0 {
+        return LibraryEmptyCopy {
+            kind: LibraryEmptyKind::Loading,
+            title: "正在拉取…".into(),
+            detail: "首次同步完成后会显示结果。".into(),
+        };
+    }
+    if tweet_count == 0 {
+        if layout == CredentialLayout::Swapped {
+            return LibraryEmptyCopy {
+                kind: LibraryEmptyKind::CredentialsSwapped,
+                title: "凭证字段填反".into(),
+                detail: CredentialLayout::Swapped.user_facing().to_string(),
+            };
+        }
+        if layout == CredentialLayout::Missing {
+            return LibraryEmptyCopy {
+                kind: LibraryEmptyKind::CredentialsMissing,
+                title: "尚未配置凭证".into(),
+                detail: "请在项目根目录配置 .env（Consumer Key 不要填 Access Token），然后点「刷新状态」。".into(),
+            };
+        }
+        if last_fetch_failed {
+            return LibraryEmptyCopy {
+                kind: LibraryEmptyKind::FetchFailed,
+                title: "拉取失败".into(),
+                detail: "上次没有拉到数据。请看上方错误（常见：字段填反、未开通按量付费、只读 Token），改完后再点「拉取并分析」。".into(),
+            };
+        }
+        if !last_synced {
+            return LibraryEmptyCopy {
+                kind: LibraryEmptyKind::NeverSynced,
+                title: "还没有拉取".into(),
+                detail: "点「拉取并分析」同步你的推文。默认会先筛曝光≤50 的原创/引用，便于找低曝光内容。".into(),
+            };
+        }
+        return LibraryEmptyCopy {
+            kind: LibraryEmptyKind::AccountEmpty,
+            title: "这次没有拉到推文".into(),
+            detail: "账号可能没有近期帖子，或下次拉取时打开「拉取含转发」。".into(),
+        };
+    }
+    if filtered_count == 0 {
+        return LibraryEmptyCopy {
+            kind: LibraryEmptyKind::FilteredEmpty,
+            title: format!("共 {tweet_count} 条，筛选后 0 条"),
+            detail:
+                "默认范围是曝光≤50、不含回帖/转发。点下方芯片去掉条件，或「清除筛选」查看全部。"
+                    .into(),
+        };
+    }
+    LibraryEmptyCopy {
+        kind: LibraryEmptyKind::AccountEmpty,
+        title: "暂无数据".into(),
+        detail: "先拉取你的推文，再按曝光、类型或时间筛选。".into(),
+    }
+}
+
+pub fn credentials_line_healthy(layout: CredentialLayout, verified_user: bool) -> bool {
+    verified_user || layout == CredentialLayout::Ready
 }
 
 pub fn chip_label(chip: &AppliedFilterChip) -> String {
@@ -601,6 +720,7 @@ pub struct AppState {
     pub theme_mode: crate::theme::ThemeMode,
     pub credentials_ok: bool,
     pub credentials_msg: SharedString,
+    pub credential_layout: CredentialLayout,
     pub current_user: Option<User>,
     pub all_tweets: Vec<Tweet>,
     pub filtered: Vec<Tweet>,
@@ -646,6 +766,8 @@ pub struct AppState {
     pub cleanup_notice: Option<SharedString>,
     /// First click arms「清空」; second click actually clears.
     pub clear_cleanup_armed: bool,
+    /// Last「拉取并分析」failed (distinct from export / delete errors).
+    pub last_fetch_failed: bool,
 }
 
 impl AppState {
@@ -654,42 +776,46 @@ impl AppState {
         // helper is global because render functions intentionally call
         // `theme::c(token)` without threading mode through every widget.
         crate::theme::set_mode(crate::theme::ThemeMode::Light);
-        let (credentials_ok, credentials_msg) = match Settings::load() {
-            Ok(s) if s.has_oauth1() => {
-                let presence = s.credential_presence();
-                logging::info(Stream::App, events::APP_CONFIG)
-                    .outcome(Outcome::Ok)
-                    .field("oauth1", true)
-                    .field("has_api_key", presence.api_key)
-                    .field("has_api_secret", presence.api_secret)
-                    .field("has_access_token", presence.access_token)
-                    .field("has_access_token_secret", presence.access_token_secret)
-                    .field("has_bearer", presence.bearer_token)
-                    .emit();
-                (true, SharedString::from("凭证已配置 ✓"))
-            }
+        let (credentials_ok, credential_layout, credentials_msg) = match Settings::load() {
             Ok(s) => {
+                let layout = s.credential_layout();
                 let presence = s.credential_presence();
-                logging::warn(Stream::App, events::APP_CONFIG)
-                    .outcome(Outcome::Error)
-                    .field("oauth1", false)
-                    .field("has_api_key", presence.api_key)
-                    .field("has_api_secret", presence.api_secret)
-                    .field("has_access_token", presence.access_token)
-                    .field("has_access_token_secret", presence.access_token_secret)
-                    .field("has_bearer", presence.bearer_token)
-                    .emit();
-                (
-                    false,
-                    SharedString::from("缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）"),
-                )
+                let ok = s.has_oauth1();
+                if ok {
+                    logging::info(Stream::App, events::APP_CONFIG)
+                        .outcome(Outcome::Ok)
+                        .field("oauth1", true)
+                        .field("layout", layout.as_str())
+                        .field("has_api_key", presence.api_key)
+                        .field("has_api_secret", presence.api_secret)
+                        .field("has_access_token", presence.access_token)
+                        .field("has_access_token_secret", presence.access_token_secret)
+                        .field("has_bearer", presence.bearer_token)
+                        .emit();
+                } else {
+                    logging::warn(Stream::App, events::APP_CONFIG)
+                        .outcome(Outcome::Error)
+                        .field("oauth1", false)
+                        .field("layout", layout.as_str())
+                        .field("has_api_key", presence.api_key)
+                        .field("has_api_secret", presence.api_secret)
+                        .field("has_access_token", presence.access_token)
+                        .field("has_access_token_secret", presence.access_token_secret)
+                        .field("has_bearer", presence.bearer_token)
+                        .emit();
+                }
+                (ok, layout, SharedString::from(layout.sidebar_zh()))
             }
             Err(e) => {
                 logging::error(Stream::App, events::APP_CONFIG)
                     .outcome(Outcome::Error)
                     .field("error", e.to_string())
                     .emit();
-                (false, SharedString::from(format!("读取配置失败: {e}")))
+                (
+                    false,
+                    CredentialLayout::Missing,
+                    SharedString::from(format!("读取配置失败: {e}")),
+                )
             }
         };
 
@@ -701,6 +827,7 @@ impl AppState {
             theme_mode: crate::theme::ThemeMode::Light,
             credentials_ok,
             credentials_msg,
+            credential_layout,
             current_user: None,
             all_tweets: Vec::new(),
             filtered: Vec::new(),
@@ -731,6 +858,7 @@ impl AppState {
             split_drag: None,
             cleanup_notice: None,
             clear_cleanup_armed: false,
+            last_fetch_failed: false,
         }
     }
 
@@ -1020,9 +1148,11 @@ impl AppState {
                 self.cleanup_snapshot.insert(id.to_owned(), tweet.clone());
             }
             self.invalidate_cleanup_receipts();
-            self.status_msg = SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len()));
-            self.cleanup_notice =
-                Some(SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len())));
+            self.status_msg =
+                SharedString::from(cleanup_staging_notice(self.cleanup_candidates.len()));
+            self.cleanup_notice = Some(SharedString::from(cleanup_staging_notice(
+                self.cleanup_candidates.len(),
+            )));
             self.clear_cleanup_armed = false;
         }
         cx.notify();
@@ -1116,7 +1246,10 @@ impl AppState {
         }
         let dir = Settings::default_export_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建导出目录: {e}"))?;
-        let path = dir.join(format!("{}.csv", artifact_file_stem("cleanup", Local::now())));
+        let path = dir.join(format!(
+            "{}.csv",
+            artifact_file_stem("cleanup", Local::now())
+        ));
         let written = export_csv(&tweets, &path).map_err(|e| e.to_string())?;
         self.backup_receipt = Some(Receipt {
             revision: self.cleanup_revision,
@@ -1201,9 +1334,9 @@ impl AppState {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let settings = Settings::load().map_err(|e| e.to_string())?;
-                    let client = XClient::new(settings).map_err(|e| e.to_string())?;
-                    client.lookup_tweets(&ids).map_err(|e| e.to_string())
+                    let settings = Settings::load().map_err(|e| e.user_facing())?;
+                    let client = XClient::new(settings).map_err(|e| e.user_facing())?;
+                    client.lookup_tweets(&ids).map_err(|e| e.user_facing())
                 })
                 .await;
             entity
@@ -1326,8 +1459,7 @@ impl AppState {
                 } else if self.filter_drawer_open {
                     self.filter_drawer_open = false;
                     cx.notify();
-                } else if self.focused_tweet_id.is_some()
-                    && self.layout_mode.inspector_as_overlay()
+                } else if self.focused_tweet_id.is_some() && self.layout_mode.inspector_as_overlay()
                 {
                     self.focused_tweet_id = None;
                     cx.notify();
@@ -1481,18 +1613,30 @@ impl AppState {
 
     fn reload_credentials(&mut self) {
         match Settings::load() {
-            Ok(s) if s.has_oauth1() => {
-                self.credentials_ok = true;
-                self.credentials_msg = SharedString::from("凭证已配置 ✓");
-            }
-            Ok(_) => {
-                self.credentials_ok = false;
-                self.credentials_msg =
-                    SharedString::from("缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）");
+            Ok(s) => {
+                self.credential_layout = s.credential_layout();
+                self.credentials_ok = s.has_oauth1();
+                self.credentials_msg = SharedString::from(self.credential_layout.sidebar_zh());
             }
             Err(e) => {
                 self.credentials_ok = false;
+                self.credential_layout = CredentialLayout::Missing;
                 self.credentials_msg = SharedString::from(format!("读取配置失败: {e}"));
+            }
+        }
+    }
+
+    fn credentials_block_reason(&self) -> String {
+        match self.credential_layout {
+            CredentialLayout::Swapped => CredentialLayout::Swapped.user_facing().to_string(),
+            CredentialLayout::AccessTokenShapeMissing => {
+                format!(
+                    "{} 仍可点「刷新状态」做一次 whoami。",
+                    CredentialLayout::AccessTokenShapeMissing.user_facing()
+                )
+            }
+            CredentialLayout::Missing | CredentialLayout::Ready => {
+                "未配置有效凭证，无法拉取。填好 .env 后可再点「拉取并分析」或「刷新状态」。".into()
             }
         }
     }
@@ -1503,9 +1647,8 @@ impl AppState {
         }
         self.reload_credentials();
         if !self.credentials_ok {
-            self.set_error(
-                "未配置有效凭证，无法拉取推文。填好 .env 后可再点「拉取并分析」或「刷新状态」。",
-            );
+            self.last_fetch_failed = true;
+            self.set_error(self.credentials_block_reason());
             cx.notify();
             return;
         }
@@ -1522,17 +1665,21 @@ impl AppState {
         Self::run_blocking(
             cx,
             move || -> Result<(User, Vec<Tweet>), String> {
-                let settings = Settings::load().map_err(|e| e.to_string())?;
-                let client = XClient::new(settings).map_err(|e| e.to_string())?;
+                let settings = Settings::load().map_err(|e| e.user_facing())?;
+                let client = XClient::new(settings).map_err(|e| e.user_facing())?;
                 client
                     .fetch_own_tweets(limit, exclude_retweets, exclude_replies)
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| e.user_facing())
             },
             |state, result, _cx| {
                 state.loading = false;
                 match result {
                     Ok((user, tweets)) => {
                         let n = tweets.len();
+                        state.last_fetch_failed = false;
+                        state.credentials_ok = true;
+                        state.credentials_msg =
+                            SharedString::from(format!("凭证有效 · @{}", user.username));
                         state.current_user = Some(user);
                         state.all_tweets = tweets;
                         state.selected.clear();
@@ -1564,7 +1711,10 @@ impl AppState {
                             ))
                         };
                     }
-                    Err(e) => state.set_error(format!("拉取失败: {e}")),
+                    Err(e) => {
+                        state.last_fetch_failed = true;
+                        state.set_error(format!("拉取失败: {e}"));
+                    }
                 }
             },
         );
@@ -1576,7 +1726,7 @@ impl AppState {
         }
         self.reload_credentials();
         if !self.credentials_ok {
-            self.set_error("未配置有效凭证。请把 .env 放在仓库根目录后再次刷新。");
+            self.set_error(self.credentials_block_reason());
             cx.notify();
             return;
         }
@@ -1586,14 +1736,17 @@ impl AppState {
         Self::run_blocking(
             cx,
             || -> Result<User, String> {
-                let settings = Settings::load().map_err(|e| e.to_string())?;
-                let client = XClient::new(settings).map_err(|e| e.to_string())?;
-                client.get_me().map_err(|e| e.to_string())
+                let settings = Settings::load().map_err(|e| e.user_facing())?;
+                let client = XClient::new(settings).map_err(|e| e.user_facing())?;
+                client.get_me().map_err(|e| e.user_facing())
             },
             |state, result, _cx| {
                 state.loading = false;
                 match result {
                     Ok(user) => {
+                        state.credentials_ok = true;
+                        state.credentials_msg =
+                            SharedString::from(format!("凭证有效 · @{}", user.username));
                         state.status_msg =
                             SharedString::from(format!("当前用户: @{}", user.username));
                         state.current_user = Some(user);
@@ -1948,8 +2101,8 @@ impl AppState {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let settings = Settings::load().map_err(|e| e.to_string())?;
-                    let client = XClient::new(settings).map_err(|e| e.to_string())?;
+                    let settings = Settings::load().map_err(|e| e.user_facing())?;
+                    let client = XClient::new(settings).map_err(|e| e.user_facing())?;
                     let outcome = client.delete_tweets(&ids);
                     Ok::<_, String>((ids, outcome))
                 })
@@ -2028,17 +2181,18 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        applied_filter_chips, chip_label, classify_preview, cleanup_next_hint,
-        cleanup_staging_notice, clamp_inspector_width, delete_confirm_ready,
-        ids_for_cleanup_staging, next_sort_from_header, preview_from_lookup, receipt_matches,
-        refresh_candidate_snapshot, resolve_focused_tweet, tweet_preview_label, workspace_shortcut,
-        AppliedFilterChip, DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft,
-        INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN, LayoutMode, Receipt, WorkspaceShortcut,
+        applied_filter_chips, chip_label, clamp_inspector_width, classify_preview,
+        cleanup_next_hint, cleanup_staging_notice, credentials_line_healthy, delete_confirm_ready,
+        ids_for_cleanup_staging, is_default_cleanup_preset, library_empty_copy,
+        next_sort_from_header, preview_from_lookup, receipt_matches, refresh_candidate_snapshot,
+        resolve_focused_tweet, tweet_preview_label, workspace_shortcut, AppliedFilterChip,
+        DeleteConfirm, DeleteConfirmToken, DeleteOutcome, FilterDraft, LayoutMode,
+        LibraryEmptyKind, Receipt, WorkspaceShortcut, INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN,
     };
     use std::collections::{HashMap, HashSet};
     use xmanager_core::{
-        FilterOptions, KindFilter, PublicMetrics, SortField, SortOrder, TimeRange, Tweet,
-        TweetLookup,
+        CredentialLayout, FilterOptions, KindFilter, PublicMetrics, SortField, SortOrder,
+        TimeRange, Tweet, TweetLookup,
     };
 
     #[test]
@@ -2065,6 +2219,7 @@ mod tests {
                 text: "cached old".into(),
                 created_at: None,
                 public_metrics: PublicMetrics::default(),
+                non_public_metrics: xmanager_core::NonPublicMetrics::default(),
                 conversation_id: None,
                 in_reply_to_user_id: None,
                 is_retweet: false,
@@ -2076,6 +2231,7 @@ mod tests {
             text: "fresh new".into(),
             created_at: None,
             public_metrics: PublicMetrics::default(),
+            non_public_metrics: xmanager_core::NonPublicMetrics::default(),
             conversation_id: None,
             in_reply_to_user_id: None,
             is_retweet: false,
@@ -2186,12 +2342,50 @@ mod tests {
     fn unrestricted_draft_drops_the_low_view_preset() {
         let preset = FilterDraft::default();
         assert_eq!(preset.max_views, Some(50));
+        assert!(is_default_cleanup_preset(&preset.to_filter_options()));
         let open = FilterDraft::unrestricted();
         assert_eq!(open.max_views, None);
         assert!(open.kinds.reply);
         assert!(open.kinds.retweet);
         assert!(open.time_range == TimeRange::All);
         assert!(open.top_n.is_none());
+        assert!(!is_default_cleanup_preset(&open.to_filter_options()));
+    }
+
+    #[test]
+    fn library_empty_copy_distinguishes_vacancy_filter_and_creds() {
+        let never = library_empty_copy(false, 0, 0, false, false, CredentialLayout::Ready);
+        assert_eq!(never.kind, LibraryEmptyKind::NeverSynced);
+        assert!(never.detail.contains("曝光≤50"));
+
+        let swapped = library_empty_copy(false, 0, 0, false, false, CredentialLayout::Swapped);
+        assert_eq!(swapped.kind, LibraryEmptyKind::CredentialsSwapped);
+        assert!(swapped.detail.contains("console.x.com"));
+        assert!(!swapped.title.contains("缺少"));
+
+        let missing = library_empty_copy(false, 0, 0, false, false, CredentialLayout::Missing);
+        assert_eq!(missing.kind, LibraryEmptyKind::CredentialsMissing);
+
+        let failed = library_empty_copy(false, 0, 0, false, true, CredentialLayout::Ready);
+        assert_eq!(failed.kind, LibraryEmptyKind::FetchFailed);
+        assert!(failed.title.contains("失败"));
+
+        let filtered = library_empty_copy(false, 87, 0, true, false, CredentialLayout::Ready);
+        assert_eq!(filtered.kind, LibraryEmptyKind::FilteredEmpty);
+        assert!(filtered.title.contains("87"));
+        assert!(filtered.detail.contains("清除筛选"));
+        assert_eq!(LibraryEmptyKind::CredentialsSwapped.mark(), "换");
+        assert_eq!(LibraryEmptyKind::FilteredEmpty.mark(), "筛");
+
+        let account = library_empty_copy(false, 0, 0, true, false, CredentialLayout::Ready);
+        assert_eq!(account.kind, LibraryEmptyKind::AccountEmpty);
+
+        assert!(credentials_line_healthy(CredentialLayout::Ready, false));
+        assert!(!credentials_line_healthy(CredentialLayout::Swapped, false));
+        assert!(credentials_line_healthy(
+            CredentialLayout::AccessTokenShapeMissing,
+            true
+        ));
     }
 
     #[test]
@@ -2230,6 +2424,7 @@ mod tests {
                 text: "一条很长的推文正文用来确认预演结果不再只显示 ID".into(),
                 created_at: None,
                 public_metrics: PublicMetrics::default(),
+                non_public_metrics: xmanager_core::NonPublicMetrics::default(),
                 conversation_id: None,
                 in_reply_to_user_id: None,
                 is_retweet: false,
@@ -2302,6 +2497,7 @@ mod tests {
                 text: "keep".into(),
                 created_at: None,
                 public_metrics: PublicMetrics::default(),
+                non_public_metrics: xmanager_core::NonPublicMetrics::default(),
                 conversation_id: None,
                 in_reply_to_user_id: None,
                 is_retweet: false,

@@ -7,6 +7,16 @@ use gpui::{
 };
 use xmanager_core::PostKind;
 
+/// Card chrome: hairline + light shadow + 8px radius.
+pub fn surface_card<E: Styled>(el: E) -> E {
+    el.bg(theme::c(theme::BG_ELEVATED))
+        .border_1()
+        .border_color(theme::c(theme::BORDER))
+        .rounded(px(radius::LG))
+        .shadow_sm()
+}
+
+/// Primary (filled) vs ghost (outline) vs disabled.
 pub fn btn(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
@@ -20,7 +30,7 @@ pub fn btn(
     } else if primary {
         theme::c(theme::ACCENT)
     } else {
-        theme::c(theme::CHIP)
+        theme::c(theme::BG_ELEVATED)
     };
     let fg = if !enabled {
         theme::c(theme::DISABLED_TEXT)
@@ -28,6 +38,13 @@ pub fn btn(
         theme::c(theme::TEXT_ON_ACCENT)
     } else {
         theme::c(theme::TEXT)
+    };
+    let border = if !enabled {
+        theme::c(theme::BORDER)
+    } else if primary {
+        theme::c(theme::ACCENT)
+    } else {
+        theme::c(theme::BORDER_STRONG)
     };
 
     theme::type_label(
@@ -42,7 +59,7 @@ pub fn btn(
             .bg(bg)
             .text_color(fg)
             .border_1()
-            .border_color(theme::c(theme::BORDER)),
+            .border_color(border),
     )
     .when(enabled, |el| {
         el.cursor_pointer()
@@ -53,7 +70,7 @@ pub fn btn(
                     theme::c(theme::BG_HOVER)
                 })
             })
-            .active(|s| s.opacity(0.85))
+            .active(|s| s.opacity(0.88))
             .on_click(on_click)
     })
     .child(label)
@@ -86,7 +103,11 @@ pub fn danger_btn(
                 theme::c(theme::DISABLED_TEXT)
             })
             .border_1()
-            .border_color(theme::c(theme::BORDER)),
+            .border_color(if enabled {
+                theme::c(theme::DANGER)
+            } else {
+                theme::c(theme::BORDER)
+            }),
     )
     .when(enabled, |el| {
         el.cursor_pointer()
@@ -136,22 +157,17 @@ pub fn toggle_chip(
 }
 
 pub fn stat_card(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(space::XS))
-        .min_w(px(96.))
-        .px(px(space::MD))
-        .py(px(space::SM))
-        .rounded(px(radius::MD))
-        .bg(theme::c(theme::BG_ELEVATED))
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
-        .child(
-            theme::type_label(div().text_color(theme::c(theme::TEXT)).font_weight(gpui::FontWeight::SEMIBOLD))
-                .child(value.into()),
-        )
+    surface_card(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(space::XS))
+            .min_w(px(104.))
+            .px(px(space::MD))
+            .py(px(space::SM)),
+    )
+    .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
+    .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(value.into()))
 }
 
 pub fn section_label(text: impl Into<SharedString>) -> Div {
@@ -293,32 +309,75 @@ pub fn kind_badge(kind: PostKind) -> Div {
 }
 
 pub fn metric_tile(label: impl Into<SharedString>, value: impl Into<SharedString>) -> Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(space::XS))
-        .min_w(px(88.))
-        .flex_1()
-        .px(px(space::SM))
-        .py(px(space::SM))
-        .rounded(px(radius::MD))
-        .bg(theme::c(theme::BG_ELEVATED))
-        .border_1()
-        .border_color(theme::c(theme::BORDER))
-        .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
-        .child(
-            theme::type_label(div().text_color(theme::c(theme::TEXT)).font_weight(gpui::FontWeight::SEMIBOLD))
-                .child(value.into()),
+    surface_card(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(space::XS))
+            .min_w(px(88.))
+            .flex_1()
+            .px(px(space::SM))
+            .py(px(space::SM)),
+    )
+    .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.into()))
+    .child(
+        theme::type_label(
+            div()
+                .text_color(theme::c(theme::TEXT))
+                .font_weight(gpui::FontWeight::SEMIBOLD),
         )
+        .child(value.into()),
+    )
 }
 
 pub fn page_heading(title: impl Into<SharedString>, subtitle: impl Into<SharedString>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap(px(space::XS))
-        .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(title.into()))
-        .child(theme::type_body(div().text_color(theme::c(theme::TEXT_MUTED))).child(subtitle.into()))
+        .gap(px(space::SM))
+        .child(theme::type_display(div().text_color(theme::c(theme::TEXT))).child(title.into()))
+        .child(
+            theme::type_body(div().text_color(theme::c(theme::TEXT_MUTED))).child(subtitle.into()),
+        )
+}
+
+/// Illustration-free empty block: mark + title + body + optional action slot.
+pub fn empty_mark(glyph: impl Into<SharedString>) -> Div {
+    theme::type_title(
+        div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(control::EMPTY_MARK))
+            .rounded(px(radius::LG))
+            .bg(theme::c(theme::CHIP))
+            .border_1()
+            .border_color(theme::c(theme::BORDER))
+            .text_color(theme::c(theme::TEXT_MUTED)),
+    )
+    .child(glyph.into())
+}
+
+pub fn status_pill(ok: bool, label: impl Into<SharedString>) -> Div {
+    theme::type_meta(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(space::XS))
+            .h(px(control::CHIP_HEIGHT))
+            .px(px(space::SM))
+            .rounded(px(radius::MD))
+            .bg(theme::c(theme::CHIP))
+            .border_1()
+            .border_color(theme::c(theme::BORDER))
+            .text_color(if ok {
+                theme::c(theme::SUCCESS)
+            } else {
+                theme::c(theme::WARNING)
+            }),
+    )
+    .child(if ok { "●" } else { "○" })
+    .child(label.into())
 }
 
 pub fn removable_chip(
@@ -333,7 +392,7 @@ pub fn removable_chip(
             .flex()
             .items_center()
             .gap(px(space::XS))
-            .h(px(24.))
+            .h(px(control::CHIP_HEIGHT))
             .px(px(space::SM))
             .rounded(px(radius::MD))
             .bg(theme::c(theme::CHIP))
@@ -354,9 +413,7 @@ pub fn removable_chip(
             .on_click(on_click)
     })
     .child(label.into())
-    .child(
-        theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child("×"),
-    )
+    .child(theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED))).child("×"))
 }
 
 pub fn count_badge(count: usize) -> Div {
@@ -417,13 +474,13 @@ pub fn nav_destination(
         .bg(if active {
             theme::c(theme::CHIP_ACTIVE)
         } else {
-            theme::c(theme::BG_ELEVATED)
+            theme::c(theme::BG_PANEL)
         })
         .border_1()
         .border_color(if active {
             theme::c(theme::ACCENT)
         } else {
-            theme::c(theme::BORDER)
+            theme::c(theme::BG_PANEL)
         })
         .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
         .on_click(on_click)
