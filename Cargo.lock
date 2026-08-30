@@ -5493,7 +5493,7 @@ dependencies = [
 
 [[package]]
 name = "xmanager-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "assert_cmd",
  "chrono",
@@ -5507,7 +5507,7 @@ dependencies = [
 
 [[package]]
 name = "xmanager-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5523,7 +5523,7 @@ dependencies = [
 
 [[package]]
 name = "xmanager-tauri"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
