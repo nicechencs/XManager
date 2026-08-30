@@ -12,7 +12,7 @@ UI_X64=""
 CLI=""
 CLI_ARM=""
 CLI_X64=""
-ICON_SRC="$ROOT/crates/xmanager-tauri/logo.png"
+ICON_SRC="$ROOT/crates/xmanager-tauri/src-tauri/logo.png"
 PLIST_IN="$ROOT/packaging/macos/Info.plist.in"
 
 usage() {

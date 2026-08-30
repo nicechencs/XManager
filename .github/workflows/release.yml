@@ -141,10 +141,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: crates/xmanager-tauri/ui/package-lock.json
+          cache-dependency-path: crates/xmanager-tauri/package-lock.json
 
       - name: Build frontend
-        working-directory: crates/xmanager-tauri/ui
+        working-directory: crates/xmanager-tauri
         run: npm ci && npm run build
 
       - name: Test workspace
@@ -207,10 +207,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: crates/xmanager-tauri/ui/package-lock.json
+          cache-dependency-path: crates/xmanager-tauri/package-lock.json
 
       - name: Build frontend
-        working-directory: crates/xmanager-tauri/ui
+        working-directory: crates/xmanager-tauri
         run: npm ci && npm run build
 
       - name: Test workspace

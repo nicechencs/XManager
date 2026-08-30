@@ -3,10 +3,10 @@
   "productName": "XManager",
   "identifier": "com.nicechencs.xmanager",
   "build": {
-    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix ui run build",
-    "frontendDist": "ui/dist"
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [

@@ -70,8 +70,8 @@ if errorlevel 1 (
 if "%BIN_ONLY%"=="1" goto try_bin
 
 echo [info] Building xmanager (Tauri) ^(%MODE%^)...
-if not exist "crates\xmanager-tauri\ui\dist\index.html" (
-  echo [error] Frontend not built. Run: cd crates\xmanager-tauri\ui ^&^& npm install ^&^& npm run build
+if not exist "crates\xmanager-tauri\dist\index.html" (
+  echo [error] Frontend not built. Run: cd crates\xmanager-tauri ^&^& npm install ^&^& npm run build
   exit /b 1
 )
 if /I "%MODE%"=="release" (
@@ -139,7 +139,7 @@ echo   cli       Run xmanager-cli ^(JSON automation^)
 echo   help      Show this help
 echo.
 echo Frontend dev with hot reload:
-echo   cd crates\xmanager-tauri\ui ^&^& npm install ^&^& npm run tauri dev
+echo   cd crates\xmanager-tauri ^&^& npm install ^&^& npm run tauri dev
 echo.
 echo Examples:
 echo   run.bat

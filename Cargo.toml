@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "crates/xmanager-core",
-    "crates/xmanager-tauri",
+    "crates/xmanager-tauri/src-tauri",
     "crates/xmanager-cli",
 ]
-default-members = ["crates/xmanager-tauri"]
+default-members = ["crates/xmanager-tauri/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

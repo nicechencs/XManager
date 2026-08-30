@@ -28,7 +28,7 @@ Usage: ./run.sh [release|debug] [bin] [-- app-args...]
   help      Show this help
 
 Frontend dev with hot reload:
-  cd crates/xmanager-tauri/ui && npm install && npm run tauri dev
+  cd crates/xmanager-tauri && npm install && npm run tauri dev
 
 Examples:
   ./run.sh
@@ -171,8 +171,8 @@ require_cargo
 warn_linux_desktop
 
 echo "[info] Building xmanager (Tauri) ($MODE)..."
-if [[ ! -f crates/xmanager-tauri/ui/dist/index.html ]]; then
-  echo "[error] Frontend not built. Run: cd crates/xmanager-tauri/ui && npm install && npm run build"
+if [[ ! -f crates/xmanager-tauri/dist/index.html ]]; then
+  echo "[error] Frontend not built. Run: cd crates/xmanager-tauri && npm install && npm run build"
   exit 1
 fi
 if [[ "$MODE" == release ]]; then

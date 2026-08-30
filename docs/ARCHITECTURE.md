@@ -34,13 +34,14 @@ XManager/
 │   └── xmanager-tauri/        # 桌面端 Tauri 应用（二进制 xmanager）
 │       ├── Cargo.toml
 │       ├── tauri.conf.json
-│       └── src/               # Rust 命令层与状态（权威状态在此）
-│           ├── main.rs
-│           ├── state.rs       # 工作台状态机（筛选/选择/安全清理工作流）
-│           ├── commands.rs    # Tauri 命令（每个命令返回完整快照）
-│           ├── actions.rs     # 前端动作枚举
-│           ├── dto.rs         # 可序列化视图快照
-│           └── ui/            # React + TypeScript + Vite 前端（纯视图层）
+│       ├── src-tauri/         # Tauri 壳（Cargo 包 xmanager-tauri）
+│       │   ├── tauri.conf.json
+│       │   └── src/           # Rust 命令层与状态（权威状态在此）
+│       │       ├── state.rs   # 工作台状态机（筛选/选择/安全清理工作流）
+│       │       ├── commands.rs# Tauri 命令（每个命令返回完整快照）
+│       │       ├── actions.rs # 前端动作枚举
+│       │       └── dto.rs     # 可序列化视图快照
+│       └── src/…  index.html  package.json   # React + TypeScript + Vite 前端（crate 根，纯视图层）
 └── exports/                   # 开发时导出目录（gitignore；打包后见用户配置目录）
 └── logs/                      # 开发时日志（gitignore；见 docs/LOGGING.md）
 ```
@@ -114,8 +115,8 @@ cargo run -p xmanager-cli -- --help
 # 或 ./run.sh cli -- --help   /   run.bat cli -- --help
 
 # 桌面应用（先构建前端）
-cd crates/xmanager-tauri/ui && npm install && npm run build && cd ../..
+(cd crates/xmanager-tauri && npm install && npm run build)
 cargo run -p xmanager-tauri --release --features custom-protocol
 # 或 ./run.sh   /   run.bat
-# 前端热更新开发：cd crates/xmanager-tauri/ui && npm run tauri dev
+# 前端热更新开发：cd crates/xmanager-tauri && npm run tauri dev
 ```

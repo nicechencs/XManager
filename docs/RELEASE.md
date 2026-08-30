@@ -47,7 +47,7 @@ CI **不会**代你创建或移动 tag。
 Windows（仓库根目录，先构建前端再编 release）：
 
 ```powershell
-cd crates\xmanager-tauri\ui; npm install; npm run build; cd ..\..
+pushd crates\xmanager-tauri; npm install; npm run build; popd
 cargo build --release -p xmanager-tauri --features custom-protocol -p xmanager-cli
 .\scripts\package-windows.ps1 -Version 0.1.0 -Ui target\release\xmanager.exe -Cli target\release\xmanager-cli.exe
 ```
@@ -55,7 +55,7 @@ cargo build --release -p xmanager-tauri --features custom-protocol -p xmanager-c
 macOS（需要 Xcode / Command Line Tools 与 Node，编两个架构再 `lipo`）：
 
 ```bash
-(cd crates/xmanager-tauri/ui && npm install && npm run build)
+(cd crates/xmanager-tauri && npm install && npm run build)
 cargo build --release --target aarch64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
 cargo build --release --target x86_64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
 ./scripts/package-macos.sh --version 0.1.0 \

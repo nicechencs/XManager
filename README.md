@@ -56,7 +56,7 @@ XManager/
 ├── crates/
 │   ├── xmanager-core/         # API · 筛选 · 导出
 │   ├── xmanager-cli/          # 命令行（JSON stdout）
-│   └── xmanager-tauri/        # Tauri 桌面端（二进制 xmanager；React 前端在 ui/）
+│   └── xmanager-tauri/        # Tauri 桌面端（二进制 xmanager；React 前端在 crate 根，Rust 壳在 src-tauri/）
 └── docs/ARCHITECTURE.md
 └── docs/DESIGN.md             # 字号 / 间距 / 交互约定
 └── docs/LOGGING.md            # 日志命名 / 保留 / 事件目录
@@ -203,7 +203,7 @@ run.bat debug bin    :: 只跑已有 debug 二进制
 
 ```bash
 # 在仓库根目录：先构建前端，再带 custom-protocol 编译后端
-cd crates/xmanager-tauri/ui && npm install && npm run build && cd ../..
+(cd crates/xmanager-tauri && npm install && npm run build)
 cargo run -p xmanager-tauri --release --features custom-protocol
 # 或
 cargo run --release
@@ -218,10 +218,12 @@ cargo run --release
 ### 前端开发（热更新）
 
 ```bash
-cd crates/xmanager-tauri/ui
+cd crates/xmanager-tauri
 npm install
 npm run tauri dev   # 同时启动 Vite dev server 与 Rust 后端，改前端即时生效
 ```
+
+> `tauri dev` 的工作目录是 `crates/xmanager-tauri/`，开发时把 `.env` 放在该目录（或设 `XMANAGER_DATA_DIR`）即可读到凭证。
 
 ## 命令行（自动化 / 测试）
 
