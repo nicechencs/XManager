@@ -24,6 +24,25 @@
 - 响应式：宽屏三栏；中屏紧凑导航；窄屏筛选/检查器为全高覆盖层，列表改为带字段标签的卡片
 - 列表虚拟化；刷新中保留旧数据并提示；空状态区分无凭证 / 无数据 / 无匹配
 
+## 界面预览
+
+主界面以深色主题展示内容库、筛选与批量管理：
+
+<p align="center">
+  <img src="docs/screenshots/library-dark-v4.png" alt="XManager 内容库主界面：推文列表、筛选条件与批量管理操作" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td align="center"><strong>数据洞察</strong></td>
+    <td align="center"><strong>安全清理</strong></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/insights-v3.png" alt="XManager 数据洞察界面：指标统计、分布图与 Top-N 排名" width="100%"></td>
+    <td><img src="docs/screenshots/cleanup-v3.png" alt="XManager 安全清理界面：待删除内容复核与备份提示" width="100%"></td>
+  </tr>
+</table>
+
 ## 目录结构
 
 ```
