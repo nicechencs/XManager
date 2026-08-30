@@ -240,6 +240,27 @@ fn env_var(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Tests that mutate process env must not run in parallel.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    const OAUTH_KEYS: &[&str] = &[
+        "X_API_KEY",
+        "X_API_SECRET",
+        "X_ACCESS_TOKEN",
+        "X_ACCESS_TOKEN_SECRET",
+    ];
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn clear_oauth_env() {
+        for key in OAUTH_KEYS {
+            std::env::remove_var(key);
+        }
+    }
 
     #[test]
     fn missing_credentials_error() {
@@ -255,6 +276,8 @@ mod tests {
 
     #[test]
     fn load_with_reads_env_next_to_exe() {
+        let _guard = lock_env();
+        clear_oauth_env();
         let dir = tempfile::tempdir().unwrap();
         let exe_dir = dir.path().join("app");
         let cwd = dir.path().join("cwd");
@@ -265,14 +288,6 @@ mod tests {
             "X_API_KEY=from-exe\nX_API_SECRET=s\nX_ACCESS_TOKEN=t\nX_ACCESS_TOKEN_SECRET=ts\n",
         )
         .unwrap();
-        for key in [
-            "X_API_KEY",
-            "X_API_SECRET",
-            "X_ACCESS_TOKEN",
-            "X_ACCESS_TOKEN_SECRET",
-        ] {
-            std::env::remove_var(key);
-        }
         let paths = PathResolver {
             cwd,
             exe: Some(exe_dir.join("xmanager.exe")),
@@ -281,18 +296,13 @@ mod tests {
         };
         let s = Settings::load_with(&paths).unwrap();
         assert_eq!(s.api_key, "from-exe");
-        for key in [
-            "X_API_KEY",
-            "X_API_SECRET",
-            "X_ACCESS_TOKEN",
-            "X_ACCESS_TOKEN_SECRET",
-        ] {
-            std::env::remove_var(key);
-        }
+        clear_oauth_env();
     }
 
     #[test]
     fn load_from_overrides_process_env() {
+        let _guard = lock_env();
+        clear_oauth_env();
         std::env::set_var("X_API_KEY", "stale");
         std::env::set_var("X_API_SECRET", "stale");
         std::env::set_var("X_ACCESS_TOKEN", "stale");
@@ -309,14 +319,7 @@ mod tests {
         assert_eq!(s.api_secret, "s");
         assert_eq!(s.access_token, "t");
         assert_eq!(s.access_token_secret, "ts");
-        for key in [
-            "X_API_KEY",
-            "X_API_SECRET",
-            "X_ACCESS_TOKEN",
-            "X_ACCESS_TOKEN_SECRET",
-        ] {
-            std::env::remove_var(key);
-        }
+        clear_oauth_env();
     }
 
     #[test]
