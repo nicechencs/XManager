@@ -1,7 +1,8 @@
 //! Application shell and the three product routes.
 
 use crate::app::{
-    cleanup_next_hint, resolve_focused_tweet, tweet_preview_label, AppState, ExportFormat, Route,
+    cleanup_next_hint, library_delete_prompt, resolve_focused_tweet, tweet_preview_label, AppState,
+    DeleteSource, ExportFormat, Route,
 };
 use crate::theme::{self, space};
 use crate::views::{status_bar, toolbar, tweet_list};
@@ -483,23 +484,36 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                         cx.listener(|this, _, _window, cx| this.focus_next(cx)),
                     )),
             )
-            .child(btn(
-                "candidate-toggle",
-                if candidate {
-                    "移出安全清理"
-                } else {
-                    "加入安全清理"
-                },
-                !candidate,
-                !state.loading,
-                cx.listener(move |this, _, _window, cx| {
-                    if candidate {
-                        this.remove_cleanup_candidate(&id, cx)
-                    } else {
-                        this.add_cleanup_candidate(&id, cx)
-                    }
-                }),
-            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap_1()
+                    .child(danger_btn(
+                        "inspector-delete-selected",
+                        "删除选中",
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| this.request_library_delete(cx)),
+                    ))
+                    .child(btn(
+                        "candidate-toggle",
+                        if candidate {
+                            "移出安全清理"
+                        } else {
+                            "加入安全清理"
+                        },
+                        !candidate,
+                        !state.loading,
+                        cx.listener(move |this, _, _window, cx| {
+                            if candidate {
+                                this.remove_cleanup_candidate(&id, cx)
+                            } else {
+                                this.add_cleanup_candidate(&id, cx)
+                            }
+                        }),
+                    )),
+            )
     });
     div()
         .id("tweet-inspector")
@@ -756,6 +770,80 @@ fn loading_banner(state: &AppState) -> Option<Div> {
     )
 }
 
+fn library_delete_outcome(state: &AppState) -> Option<Div> {
+    state.last_delete_outcome.as_ref().map(|outcome| {
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap(px(space::SM))
+            .px(px(space::LG))
+            .py(px(space::SM))
+            .bg(theme::c(theme::BG_ELEVATED))
+            .border_b_1()
+            .border_color(if outcome.failed.is_empty() {
+                theme::c(theme::SUCCESS)
+            } else {
+                theme::c(theme::DANGER)
+            })
+            .child(
+                theme::type_label(div().text_color(if outcome.failed.is_empty() {
+                    theme::c(theme::SUCCESS)
+                } else {
+                    theme::c(theme::DANGER)
+                }))
+                .child(outcome.summary_line()),
+            )
+    })
+}
+
+fn library_delete_confirm(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
+    let confirm = state.delete_confirm.as_ref()?;
+    if confirm.source != DeleteSource::Library {
+        return None;
+    }
+    let n = confirm.expected_count;
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(space::SM))
+            .px(px(space::LG))
+            .py(px(space::MD))
+            .bg(theme::c(theme::BG_ELEVATED))
+            .border_b_1()
+            .border_color(theme::c(theme::DANGER))
+            .child(
+                theme::type_label(div().text_color(theme::c(theme::DANGER)))
+                    .child(library_delete_prompt(n)),
+            )
+            .child(
+                theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
+                    .child("确认后会自动备份到 exports/，再向 X 提交删除。仍留在内容库。"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap_2()
+                    .child(danger_btn(
+                        "library-delete-confirm",
+                        "确认",
+                        !state.loading,
+                        cx.listener(|this, _, window, cx| this.confirm_and_delete(window, cx)),
+                    ))
+                    .child(btn(
+                        "library-delete-cancel",
+                        "取消",
+                        false,
+                        !state.loading,
+                        cx.listener(|this, _, _window, cx| this.cancel_delete_confirm(cx)),
+                    )),
+            ),
+    )
+}
+
 fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
     let layout = state.layout_mode;
     let focused = state.focused_tweet_id.is_some();
@@ -780,6 +868,8 @@ fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div>
             .flex_1()
             .min_h(px(0.))
             .min_w(px(0.))
+            .children(library_delete_outcome(state))
+            .children(library_delete_confirm(state, cx))
             .child(inspector(state, cx));
     }
 
@@ -817,6 +907,8 @@ fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div>
             .child(toolbar::render_toolbar(state, cx))
             .children(toolbar::render_cleanup_notice(state, cx))
             .children(loading_banner(state))
+            .children(library_delete_outcome(state))
+            .children(library_delete_confirm(state, cx))
             .child(tweet_list::render_tweet_list(state, cx))
             .child(toolbar::render_bulk_bar(state, cx)),
     );
@@ -928,7 +1020,10 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
     });
     let has_candidates = !state.loading && !candidate_ids.is_empty();
     let can_open_delete_confirm = has_candidates;
-    let confirm = state.delete_confirm.as_ref();
+    let confirm = state
+        .delete_confirm
+        .as_ref()
+        .filter(|c| c.source == DeleteSource::Cleanup);
     let expected_count = confirm
         .map(|c| c.expected_count)
         .unwrap_or(candidate_ids.len());
@@ -953,12 +1048,8 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(div().flex_1())
                 .child(danger_btn(
                     "delete-cleanup",
-                    if confirm.is_some() {
-                        "继续确认…".to_string()
-                    } else {
-                        format!("删除 {} 条", candidate_ids.len())
-                    },
-                    can_open_delete_confirm,
+                    format!("删除 {} 条", candidate_ids.len()),
+                    can_open_delete_confirm && confirm.is_none(),
                     cx.listener(|this, _, window, cx| this.delete_previewed(window, cx)),
                 ))
                 .child(btn(
@@ -1216,7 +1307,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     div()
                         .text_sm()
                         .text_color(theme::c(theme::TEXT_MUTED))
-                        .child("在内容库勾选或打开一条，再加入安全清理。"),
+                        .child("内容库可直接删除选中。需要复核时再加入安全清理。"),
                 )
                 .child(btn(
                     "cleanup-to-library",

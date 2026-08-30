@@ -43,7 +43,7 @@ XManager/
 1. **UI 与领域分离**：所有 X API、筛选、导出逻辑在 `xmanager-core`；GPUI 只负责展示与交互。
 2. **阻塞 IO 在后台线程**：`reqwest::blocking` 不在 UI 帧内调用；通过 `background_executor` / 后台任务回写状态。
 3. **凭证只来自环境**：`.env` / 环境变量；永不写死密钥。
-4. **删除需确认**：安全清理绑定 revision/receipt；真删前自动备份 + 预演，再确认一次。
+4. **删除需确认**：内容库可直接「删除选中」（一次确认 + 自动备份）；安全清理仍绑定 revision/receipt，真删前自动备份 + 预演，再确认一次。
 5. **目录干净**：根目录只放 workspace 配置与文档；实现代码只在 `crates/*`。
 6. **本地可审计日志**：诊断写 `logs/xmanager-app-YYYY-MM-DD.log`（14 天）；备份/预演/删除写 `logs/xmanager-audit-YYYY-MM-DD.log`（90 天，Info+ 不丢）。密钥与推文正文禁止入日志。详见 [LOGGING.md](LOGGING.md)。
 
@@ -51,7 +51,7 @@ XManager/
 
 - **路由**：`Library | Insights | Cleanup`（共享 `AppState`，切页不丢筛选/候选）。
 - **筛选**：抽屉改条件后立刻写入 `applied_filter` 并重算列表。拉取条数 / 含转发与筛选分开，只影响下次 API 请求。chip 只显示非默认条件，可逐个移除。
-- **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。加入候选不切页；`cleanup_notice` 横幅提供「去安全清理」。
+- **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。加入候选不切页；`cleanup_notice` 横幅提供「去安全清理」。内容库「删除选中」走独立确认，不要求先加入候选。
 - **视觉**：色板、字号、行高、间距 token 在 `xmanager-ui` 的 `theme.rs`，约定见 [DESIGN.md](DESIGN.md)。
 - **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
 - **列表**：`uniform_list` 虚拟化渲染筛选结果。
@@ -69,6 +69,7 @@ XManager/
 tweets[] → FilterOptions
             (time_range / kinds / rates / top_n / max_views …)
          → filter_tweets → 内容库列表 / 数据洞察 / 导出
+         → 内容库「删除选中」→ confirm → backup → delete
          → cleanup candidates → backup → preview → confirm → delete
 ```
 

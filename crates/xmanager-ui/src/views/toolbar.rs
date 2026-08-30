@@ -4,7 +4,7 @@ use crate::app::{
     chip_label, is_default_cleanup_preset, AppState, AppliedFilterChip, ExportFormat, Route,
 };
 use crate::theme::{self, space};
-use crate::widgets::{btn, removable_chip, surface_card, toggle_chip};
+use crate::widgets::{btn, danger_btn, removable_chip, surface_card, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
 
 pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
@@ -271,11 +271,14 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 theme::c(theme::TEXT_MUTED)
             }))
             .child(if has_selection {
-                format!("已选 {} 条，加入后仍留在内容库", state.selected.len())
+                format!(
+                    "已选 {} 条。可直接删除，或加入安全清理复核。",
+                    state.selected.len()
+                )
             } else if has_focus {
-                "已查看当前推文，可加入安全清理（不会离开本页）".into()
+                "已查看当前推文，可删除或加入安全清理（不会离开本页）".into()
             } else {
-                "勾选左侧方框，或点开一条后加入安全清理".into()
+                "勾选左侧方框，或点开一条后删除 / 加入安全清理".into()
             }),
         )
         .child(btn(
@@ -300,10 +303,16 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
             cx.listener(|this, _, _window, cx| this.invert_selection(cx)),
         ))
         .child(div().flex_1())
+        .child(danger_btn(
+            "library-delete-selected",
+            "删除选中",
+            !state.loading && can_stage,
+            cx.listener(|this, _, _window, cx| this.request_library_delete(cx)),
+        ))
         .child(btn(
             "add-cleanup-btn",
             "加入安全清理",
-            true,
+            false,
             !state.loading && can_stage,
             cx.listener(|this, _, _window, cx| this.add_selected_to_cleanup(cx)),
         ))
