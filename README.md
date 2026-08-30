@@ -227,7 +227,7 @@ npm run tauri dev   # 同时启动 Vite dev server 与 Rust 后端，改前端�
 
 ## 更新升级
 
-**应用内更新（v0.2.0 起）**：应用启动后会静默检查 GitHub Releases（每 3 秒后一次），发现新版本会在窗口顶部出现「发现新版本」横幅，点「下载并安装」→「立即重启」即可完成升级；侧栏「检查更新」可手动触发。更新包经 minisign 签名校验，签名不符会被拒绝。
+**应用内更新（v0.2.0 起）**：应用启动后会静默检查 GitHub Releases（每 3 秒后一次），发现新版本会在窗口顶部出现「发现新版本」横幅，点「下载并安装」→「立即重启」即可完成升级；侧栏「检查更新」可手动触发。更新包经 minisign 签名校验，签名不符会被拒绝。签名密钥与 Secret 配置见 docs/RELEASE.md。
 
 **从旧版便携 zip 升级**：下载新 zip 后只覆盖程序文件（Windows 覆盖 `XManager.exe`、`xmanager-cli.exe`；macOS 替换 `/Applications/XManager.app`）。`.env`、`exports/`、`logs/` 都在程序外，升级不受影响。
 

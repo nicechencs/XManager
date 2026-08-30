@@ -57,12 +57,12 @@ CI **不会**代你创建或移动 tag。
 
 **首次启用需要配置一次签名密钥**：
 
-1. 本地生成密钥对（私钥绝不入库、不进聊天记录）：
-   `npx tauri signer generate -w ~/.tauri/xmanager-updater.key`
-2. 在 GitHub 仓库 Settings → Secrets and variables → Actions 添加：
-   - `TAURI_SIGNING_PRIVATE_KEY` = 私钥文件全文
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = 生成时设置的密码（无密码留空）
-3. 公钥已写入 `tauri.conf.json`。换密钥 = 换公钥，老客户端只认旧公钥，因此**永不更换**，除非接受用户手动重装。
+1. 本地生成密钥对（私钥绝不入库；必须设置**非空密码**，因为 GitHub Secrets 不允许空值）：
+   `npx tauri signer generate -w ~/.tauri/xmanager-updater.key --password "<你的密码>"`
+2. 在 GitHub 仓库 Settings → Secrets and variables → Actions 添加两条**非空** Secret：
+   - `TAURI_SIGNING_PRIVATE_KEY` = 私钥**文件全文**（内容本身，不是文件路径）
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = 生成时设置的密码
+3. 公钥写入 `tauri.conf.json > plugins.updater.pubkey`。换密钥 = 换公钥，老客户端只认旧公钥，因此**永不更换**，除非接受老用户手动重装一次。
 
 未配置密钥时工作流照常发版（仅便携 zip，无 `latest.json`），应用内检查会 404 并静默跳过；
 之后任意一次带密钥的发版会自动恢复应用内更新。**一旦用过 updater，之后每次发版都必须带私钥**，
