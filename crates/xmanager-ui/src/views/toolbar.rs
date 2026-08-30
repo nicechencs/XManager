@@ -271,7 +271,10 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 theme::c(theme::TEXT_MUTED)
             }))
             .child(if has_selection {
-                format!("已选 {} 条。可直接删除，或加入安全清理复核。", state.selected.len())
+                format!(
+                    "已选 {} 条。可直接删除，或加入安全清理复核。",
+                    state.selected.len()
+                )
             } else if has_focus {
                 "已查看当前推文，可删除或加入安全清理（不会离开本页）".into()
             } else {

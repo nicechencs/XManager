@@ -1092,7 +1092,8 @@ impl AppState {
             return;
         }
         self.delete_confirm = Some(DeleteConfirm::cleanup(self.cleanup_candidates.clone()));
-        self.status_msg = SharedString::from(format!("将删除 {n} 条。点「确认删除」继续，或取消。"));
+        self.status_msg =
+            SharedString::from(format!("将删除 {n} 条。点「确认删除」继续，或取消。"));
         self.error_msg = None;
         cx.notify();
     }
@@ -2091,7 +2092,10 @@ impl AppState {
         }
         self.all_tweets.retain(|t| !deleted.contains(&t.id));
         self.selected.retain(|id| !deleted.contains(id));
-        let cleanup_changed = self.cleanup_candidates.iter().any(|id| deleted.contains(id));
+        let cleanup_changed = self
+            .cleanup_candidates
+            .iter()
+            .any(|id| deleted.contains(id));
         self.cleanup_candidates.retain(|id| !deleted.contains(id));
         if cleanup_changed {
             self.invalidate_cleanup_receipts();
@@ -2349,12 +2353,12 @@ mod tests {
 
     #[test]
     fn delete_confirm_is_ready_when_count_is_positive() {
-        assert!(!delete_confirm_ready(&DeleteConfirm::cleanup(HashSet::new())));
-        assert!(delete_confirm_ready(&DeleteConfirm::library(HashSet::from([
-            "a".to_owned(),
-            "b".to_owned(),
-            "c".to_owned()
-        ]))));
+        assert!(!delete_confirm_ready(&DeleteConfirm::cleanup(
+            HashSet::new()
+        )));
+        assert!(delete_confirm_ready(&DeleteConfirm::library(
+            HashSet::from(["a".to_owned(), "b".to_owned(), "c".to_owned()])
+        )));
     }
 
     #[test]
