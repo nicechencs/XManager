@@ -6,8 +6,7 @@ on:
       - "v*.*.*"
 
 # Native Windows + macOS builds, then a draft GitHub Release.
-# Pattern follows AgentHub (tag-triggered, pinned actions, rust-cache,
-# publish job is the only writer) without Tauri updater/signing.
+# Tags must point at a commit already on origin/main (merge dev → main, then tag).
 # GPUI cannot be cross-compiled; each OS builds on its own runner.
 permissions:
   contents: read
@@ -46,22 +45,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require tagged commit is on origin/dev or origin/main
+      - name: Require tagged commit is on origin/main
         shell: bash
         run: |
           set -euo pipefail
-          found=0
-          for branch in dev main; do
-            if git fetch --no-tags origin "$branch" && git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
-              echo "Tag $GITHUB_REF_NAME is on origin/$branch"
-              found=1
-            fi
-          done
-          if [ "$found" -ne 1 ]; then
-            echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on origin/dev or origin/main." >&2
-            echo "Merge to dev or main first, then tag that commit." >&2
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on origin/main." >&2
+            echo "Merge dev into main first, then tag that commit and push the tag." >&2
             exit 1
           fi
+          echo "Tag $GITHUB_REF_NAME is on origin/main"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1

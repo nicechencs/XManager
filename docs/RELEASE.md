@@ -1,6 +1,6 @@
 # 发版
 
-流程对齐 [AgentHub](https://github.com/nicechencs/AgentHub) 的 GitHub Actions 骨架：`v*` tag 触发、Windows / macOS **各自原生编译**、草稿 Release。XManager 是 GPUI 桌面程序，没有 Tauri 签名 / updater / `release` 分支。
+`v*` tag 触发、Windows / macOS **各自原生编译**、草稿 Release。发版只认 **`main`**：日常在 `dev` 开发，合进 `main` 后再打 tag。
 
 ## 产物
 
@@ -16,19 +16,29 @@
 
 ## 打 tag
 
-1. 把 `[workspace.package] version` 改成要发的版本（例如 `0.1.0`）。
-2. 提交并推到 `dev`（或合进 `main`）。**tag 指向的提交必须已经在 `origin/dev` 或 `origin/main` 上**。
-3. 打与 Cargo 版本一致的 tag（前缀 `v`）：
+1. 把 `[workspace.package] version` 改成要发的版本（例如 `0.1.1`）。
+2. 在 `dev` 上提交、推送，等 CI 绿。
+3. 把 `dev` 合进 `main` 并推送（快进即可）：
 
 ```bash
-git tag -a v0.1.0 -m "XManager 0.1.0"
-git push origin v0.1.0
+git checkout main
+git merge --ff-only dev
+git push origin main
 ```
 
-4. 打开 Actions 里的 **Release** 工作流，等 Windows / macOS 编完。
-5. GitHub 上会出现 **draft** Release。下载 zip 自己点一下，再在网页上点 Publish。
+4. **tag 必须指向已经在 `origin/main` 上的提交。** 在该提交上打与 Cargo 版本一致的 tag（前缀 `v`）：
 
-预发布用 `v0.1.0-rc.1` 这种 semver，工作流会加上 prerelease 标记。
+```bash
+git tag -a v0.1.1 -m "XManager 0.1.1"
+git push origin v0.1.1
+```
+
+只在 `dev` 上打 tag、还没合 `main`，Release 工作流会拒绝。
+
+5. 打开 Actions 里的 **Release** 工作流，等 Windows / macOS 编完。
+6. GitHub 上会出现 **draft** Release。下载 zip 自己点一下，再在网页上点 Publish。
+
+预发布用 `v0.1.1-rc.1` 这种 semver，工作流会加上 prerelease 标记。
 
 CI **不会**代你创建或移动 tag。
 
@@ -60,6 +70,6 @@ cargo build --release --target x86_64-apple-darwin -p xmanager-ui -p xmanager-cl
 | 文件 | 何时跑 |
 |------|--------|
 | `.github/workflows/ci.yml` | PR，以及 push 到 `main` / `dev` |
-| `.github/workflows/release.yml` | 推送 `v*.*.*` tag |
+| `.github/workflows/release.yml` | 推送 `v*.*.*` tag（提交须已在 `origin/main`） |
 
 PR CI：`rustfmt`、Windows / macOS 全 workspace 测试、Linux 上只测 `xmanager-core` 和 `xmanager-cli`（桌面端 GPUI 不在 Ubuntu 交叉编译）。
