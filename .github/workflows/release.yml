@@ -167,9 +167,15 @@ jobs:
           else
             npx tauri build --bundles nsis
           fi
+
+      # cargo builds into the workspace-root target/, so collect from there.
+      - name: Collect updater artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p dist/updater
-          cp target/release/bundle/nsis/*.exe dist/updater/ 2>/dev/null || true
-          cp target/release/bundle/nsis/*.sig dist/updater/ 2>/dev/null || true
+          cp target/release/bundle/nsis/*.exe dist/updater/
+          cp target/release/bundle/nsis/*.sig dist/updater/
           ls -la dist/updater
 
       - name: Package zip
@@ -264,9 +270,14 @@ jobs:
           else
             npx tauri build --target universal-apple-darwin --bundles app
           fi
+
+      # cargo builds into the workspace-root target/, so collect from there.
+      - name: Collect updater artifacts
+        run: |
+          set -euo pipefail
           mkdir -p dist/updater
-          cp target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz dist/updater/ 2>/dev/null || true
-          cp target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig dist/updater/ 2>/dev/null || true
+          cp target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz dist/updater/
+          cp target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig dist/updater/
           ls -la dist/updater
 
       - name: Package .app zip
