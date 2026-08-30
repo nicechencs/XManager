@@ -128,13 +128,6 @@ impl ThemeMode {
         }
     }
 
-    pub const fn opposite_label_zh(self) -> &'static str {
-        match self {
-            Self::Light => "深色",
-            Self::Dark => "浅色",
-        }
-    }
-
     const fn from_u8(value: u8) -> Self {
         match value {
             1 => Self::Dark,
@@ -155,13 +148,6 @@ pub fn current_mode() -> ThemeMode {
 #[inline]
 pub fn set_mode(mode: ThemeMode) {
     CURRENT_MODE.store(mode as u8, Ordering::Relaxed);
-}
-
-/// Flip the process-wide appearance and return the new mode.
-#[inline]
-pub fn toggle_mode() -> ThemeMode {
-    let previous = CURRENT_MODE.fetch_xor(1, Ordering::Relaxed);
-    ThemeMode::from_u8(previous ^ 1)
 }
 
 // Dark palette values are intentionally kept unchanged so existing callers and

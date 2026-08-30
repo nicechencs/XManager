@@ -453,12 +453,14 @@ pub fn count_badge(count: usize) -> Div {
 pub fn nav_destination(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
+    glyph: impl Into<SharedString>,
     compact: bool,
     active: bool,
     badge: Option<usize>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     let label = label.into();
+    let glyph = glyph.into();
     div()
         .id(id.into())
         .flex()
@@ -496,11 +498,22 @@ pub fn nav_destination(
         .child(
             theme::type_label(
                 div()
-                    .when(active && !compact, |el| {
-                        el.pl(px(space::XS))
-                            .border_l_2()
-                            .border_color(theme::c(theme::ACCENT))
-                    })
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(22.))
+                    .text_color(if active {
+                        theme::c(theme::ACCENT)
+                    } else {
+                        theme::c(theme::TEXT_MUTED)
+                    }),
+            )
+            .child(glyph),
+        )
+        .child(
+            theme::type_label(
+                div()
+                    .flex_1()
                     .font_weight(if active {
                         gpui::FontWeight::SEMIBOLD
                     } else {

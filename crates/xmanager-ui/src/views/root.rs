@@ -4,11 +4,11 @@ use crate::app::{
     cleanup_next_hint, library_delete_prompt, resolve_focused_tweet, tweet_preview_label, AppState,
     DeleteSource, ExportFormat, Route,
 };
-use crate::theme::{self, space};
+use crate::theme::{self, space, ThemeMode};
 use crate::views::{status_bar, toolbar, tweet_list};
 use crate::widgets::{
-    app_logo, btn, count_badge, danger_btn, kind_badge, metric_tile, nav_destination, page_heading,
-    section_label, status_pill, stepper, surface_card, toggle_chip,
+    app_logo, btn, count_badge, danger_btn, empty_mark, kind_badge, metric_tile, nav_destination,
+    page_heading, section_label, status_pill, stepper, surface_card, toggle_chip,
 };
 use gpui::{
     div, prelude::*, px, Context, CursorStyle, Div, KeyDownEvent, MouseButton, MouseDownEvent,
@@ -550,40 +550,37 @@ fn inspector(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div> {
                             "检查器"
                         }),
                 )
-                .when(overlay, |el| {
-                    el.child(btn(
-                        "inspector-close",
-                        "关闭",
-                        false,
-                        true,
-                        cx.listener(|this, _, _window, cx| {
-                            this.focused_tweet_id = None;
-                            cx.notify();
-                        }),
-                    ))
-                }),
+                .child(btn(
+                    "inspector-close",
+                    "关闭",
+                    false,
+                    true,
+                    cx.listener(|this, _, _window, cx| {
+                        this.focused_tweet_id = None;
+                        cx.notify();
+                    }),
+                )),
         )
         .child(body.unwrap_or_else(|| {
             div()
                 .flex()
                 .flex_col()
-                .gap_2()
-                .child(section_label("选择一条推文查看完整内容"))
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .gap(px(space::MD))
+                .child(empty_mark("📄"))
                 .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .gap_2()
-                        .child(metric_tile("当前结果", state.filtered.len().to_string()))
-                        .child(metric_tile(
-                            "安全清理候选",
-                            state.cleanup_candidates.len().to_string(),
-                        )),
+                    theme::type_title(div().text_color(theme::c(theme::TEXT))).child("未选择推文"),
                 )
-                .child(div().text_xs().text_color(theme::c(theme::TEXT_DIM)).child(
-                    "J / K 上下条 · 空格勾选 · / 打开筛选 · 1 内容库 · 2 洞察 · 3 清理 · Esc 关闭",
-                ))
+                .child(
+                    theme::type_body(
+                        div()
+                            .max_w(px(240.))
+                            .text_color(theme::c(theme::TEXT_MUTED)),
+                    )
+                    .child("在内容库中选择一条推文，这里将显示完整内容与详情。"),
+                )
         }))
 }
 
@@ -641,20 +638,15 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child(app_logo())
                 .when(show_labels, |el| {
                     el.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                theme::type_display(div().text_color(theme::c(theme::TEXT)))
-                                    .child("XManager"),
-                            )
-                            .child(section_label("工作台")),
+                        theme::type_display(div().text_color(theme::c(theme::TEXT)))
+                            .child("XManager"),
                     )
                 }),
         )
         .child(nav_destination(
             "nav-library",
             if compact { "内容" } else { "内容库" },
+            "☰",
             compact,
             state.active_route == Route::Library,
             None,
@@ -663,6 +655,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .child(nav_destination(
             "nav-insights",
             if compact { "洞察" } else { "数据洞察" },
+            "▦",
             compact,
             state.active_route == Route::Insights,
             None,
@@ -671,6 +664,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .child(nav_destination(
             "nav-cleanup",
             if compact { "清理" } else { "安全清理" },
+            "◉",
             compact,
             state.active_route == Route::Cleanup,
             Some(state.cleanup_candidates.len()),
@@ -678,21 +672,7 @@ fn navigation_sidebar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         ))
         .child(div().flex_1())
         .child(sidebar_account_card(state, show_labels, cx))
-        .child(btn(
-            "sidebar-theme",
-            if show_labels {
-                format!(
-                    "{} → {}",
-                    state.theme_mode.label_zh(),
-                    state.theme_mode.opposite_label_zh()
-                )
-            } else {
-                state.theme_mode.opposite_label_zh().to_string()
-            },
-            false,
-            true,
-            cx.listener(|this, _, _window, cx| this.toggle_theme(cx)),
-        ))
+        .child(theme_switch(state, compact, cx))
 }
 
 fn sidebar_account_card(state: &AppState, show_labels: bool, cx: &mut Context<AppState>) -> Div {
@@ -704,16 +684,19 @@ fn sidebar_account_card(state: &AppState, show_labels: bool, cx: &mut Context<Ap
         None if show_labels => "尚未同步".into(),
         None => "未同步".into(),
     };
-    let count_line = if show_labels {
-        format!("{} 条数据", state.all_tweets.len())
-    } else {
-        format!("{} 条", state.all_tweets.len())
-    };
-    surface_card(div().flex().flex_col().gap(px(space::SM)).p(px(space::SM)))
-        .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(count_line))
-        .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM))).child(sync_line))
+    let count_line = format!("{} 条", state.all_tweets.len());
+    surface_card(div().flex().flex_col().gap(px(space::XS)).p(px(space::SM)))
+        .child(status_pill(creds_ok, state.credentials_msg.clone()))
         .when(show_labels, |el| {
-            el.child(status_pill(creds_ok, state.credentials_msg.clone()))
+            el.child(
+                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
+                    .child(format!("{count_line} · {sync_line}")),
+            )
+        })
+        .when(!show_labels, |el| {
+            el.child(
+                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM))).child(count_line),
+            )
         })
         .child(btn(
             "sidebar-refresh",
@@ -726,12 +709,77 @@ fn sidebar_account_card(state: &AppState, show_labels: bool, cx: &mut Context<Ap
             !state.loading,
             cx.listener(|this, _, _window, cx| this.refresh_whoami(cx)),
         ))
-        .when(show_labels, |el| {
-            el.child(
-                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
-                    .child("J/K · 空格 · / 筛选 · 1–3 切页"),
-            )
-        })
+}
+
+fn theme_switch(state: &AppState, compact: bool, cx: &mut Context<AppState>) -> Div {
+    let light = state.theme_mode == ThemeMode::Light;
+    div()
+        .flex()
+        .flex_row()
+        .w_full()
+        .p(px(2.))
+        .gap(px(2.))
+        .rounded(px(theme::radius::MD))
+        .bg(theme::c(theme::CHIP))
+        .border_1()
+        .border_color(theme::c(theme::BORDER))
+        .child(theme_segment(
+            "theme-light",
+            if compact {
+                "浅"
+            } else {
+                ThemeMode::Light.label_zh()
+            },
+            light,
+            cx.listener(|this, _, _window, cx| this.set_theme_mode(ThemeMode::Light, cx)),
+        ))
+        .child(theme_segment(
+            "theme-dark",
+            if compact {
+                "深"
+            } else {
+                ThemeMode::Dark.label_zh()
+            },
+            !light,
+            cx.listener(|this, _, _window, cx| this.set_theme_mode(ThemeMode::Dark, cx)),
+        ))
+}
+
+fn theme_segment(
+    id: &'static str,
+    label: &'static str,
+    active: bool,
+    on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+) -> gpui::Stateful<Div> {
+    theme::type_caption(
+        div()
+            .id(id)
+            .flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .h(px(theme::control::CHIP_HEIGHT))
+            .rounded(px(theme::radius::SM))
+            .cursor_pointer()
+            .bg(if active {
+                theme::c(theme::BG_ELEVATED)
+            } else {
+                theme::c(theme::CHIP)
+            })
+            .text_color(if active {
+                theme::c(theme::TEXT)
+            } else {
+                theme::c(theme::TEXT_MUTED)
+            })
+            .font_weight(if active {
+                gpui::FontWeight::SEMIBOLD
+            } else {
+                gpui::FontWeight::MEDIUM
+            }),
+    )
+    .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
+    .on_click(on_click)
+    .child(label)
 }
 
 fn loading_banner(state: &AppState) -> Option<Div> {
@@ -904,13 +952,26 @@ fn render_library(state: &AppState, cx: &mut Context<AppState>) -> Stateful<Div>
             .flex_1()
             .min_w(px(280.))
             .min_h(px(0.))
+            .p(px(space::LG))
+            .gap(px(space::MD))
+            .bg(theme::c(theme::BG))
             .child(toolbar::render_toolbar(state, cx))
             .children(toolbar::render_cleanup_notice(state, cx))
             .children(loading_banner(state))
             .children(library_delete_outcome(state))
             .children(library_delete_confirm(state, cx))
-            .child(tweet_list::render_tweet_list(state, cx))
-            .child(toolbar::render_bulk_bar(state, cx)),
+            .child(
+                surface_card(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .overflow_hidden(),
+                )
+                .child(tweet_list::render_tweet_list(state, cx))
+                .child(toolbar::render_bulk_bar(state, cx)),
+            ),
     );
     if show_split {
         content = content

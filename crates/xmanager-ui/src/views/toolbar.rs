@@ -1,10 +1,8 @@
-//! Library page toolbar and the transient selection bar.
+//! Library page heading, filter card, and the sticky selection bar.
 
-use crate::app::{
-    chip_label, is_default_cleanup_preset, AppState, AppliedFilterChip, ExportFormat, Route,
-};
+use crate::app::{chip_label, AppState, AppliedFilterChip, ExportFormat, Route};
 use crate::theme::{self, space};
-use crate::widgets::{btn, danger_btn, removable_chip, surface_card, toggle_chip};
+use crate::widgets::{btn, danger_btn, page_heading, removable_chip, surface_card, toggle_chip};
 use gpui::{div, prelude::*, px, Context, Div};
 
 pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Option<Div> {
@@ -15,11 +13,12 @@ pub fn render_cleanup_notice(state: &AppState, cx: &mut Context<AppState>) -> Op
             .flex_wrap()
             .items_center()
             .gap(px(space::SM))
-            .px(px(space::LG))
+            .px(px(space::MD))
             .py(px(space::SM))
             .bg(theme::c(theme::CHIP_ACTIVE))
-            .border_b_1()
+            .border_1()
             .border_color(theme::c(theme::ACCENT))
+            .rounded(px(theme::radius::LG))
             .child(
                 theme::type_body(div().flex_1().text_color(theme::c(theme::TEXT)))
                     .child(msg.clone()),
@@ -81,32 +80,12 @@ fn applied_chip(
     )
 }
 
-fn kpi(label: &str, value: impl Into<String>) -> Div {
-    surface_card(
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(space::XS))
-            .min_w(px(96.))
-            .px(px(space::MD))
-            .py(px(space::SM)),
-    )
-    .child(theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED))).child(label.to_string()))
-    .child(theme::type_title(div().text_color(theme::c(theme::TEXT))).child(value.into()))
-}
-
 pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
     let can_fetch = !state.loading;
-    let s = &state.summary;
     div()
         .flex()
         .flex_col()
         .gap(px(space::MD))
-        .px(px(space::LG))
-        .py(px(space::MD))
-        .bg(theme::c(theme::BG_PANEL))
-        .border_b_1()
-        .border_color(theme::c(theme::BORDER))
         .child(
             div()
                 .flex()
@@ -115,10 +94,7 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .items_center()
                 .justify_between()
                 .gap_3()
-                .child(crate::widgets::page_heading(
-                    "内容库",
-                    "筛选、检查并整理你的 X 内容",
-                ))
+                .child(page_heading("内容库", "筛选、检查并整理你的 X 内容"))
                 .child(
                     div()
                         .flex()
@@ -157,95 +133,96 @@ pub fn render_toolbar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         )),
                 ),
         )
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap(px(space::SM))
-                .children([
-                    toggle_chip(
-                        "filter-drawer-toggle",
-                        {
-                            let n = state.applied_chips().len();
-                            if state.filter_drawer_open {
-                                format!("收起筛选 · {n}")
-                            } else {
-                                format!("筛选 · {n}")
-                            }
-                        },
-                        state.filter_drawer_open,
-                        cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
-                    ),
-                    toggle_chip(
-                        "sort-summary",
-                        format!("排序：{}", state.applied_filter.sort.label_zh()),
-                        false,
-                        cx.listener(|this, _, _window, cx| {
-                            this.filter_drawer_open = true;
-                            cx.notify();
-                        }),
-                    ),
-                ]),
-        )
-        .child({
-            let enabled = !state.loading;
-            let chips: Vec<_> = state
-                .applied_chips()
-                .into_iter()
-                .enumerate()
-                .map(|(idx, chip)| {
-                    let label = chip_label(&chip);
-                    applied_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx)
-                        .into_any_element()
-                })
-                .collect();
-            let has_chips = !chips.is_empty();
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap(px(space::SM))
-                .children(chips)
-                .when(has_chips, |el| {
-                    el.child(btn(
-                        "toolbar-clear-filters",
-                        "清除全部",
-                        false,
-                        !state.loading,
-                        cx.listener(|this, _, _window, cx| {
-                            this.filter_draft = crate::app::FilterDraft::unrestricted();
-                            this.apply_filters(cx);
-                            cx.notify();
-                        }),
-                    ))
-                })
+        .child(render_filter_card(state, cx))
+}
+
+fn render_filter_card(state: &AppState, cx: &mut Context<AppState>) -> Div {
+    let enabled = !state.loading;
+    let chips: Vec<_> = state
+        .applied_chips()
+        .into_iter()
+        .enumerate()
+        .map(|(idx, chip)| {
+            let label = chip_label(&chip);
+            applied_chip(format!("applied-chip-{idx}"), label, chip, enabled, cx).into_any_element()
         })
-        .when(is_default_cleanup_preset(&state.applied_filter), |el| {
-            el.child(
-                theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
-                    .child("默认范围：曝光≤50、不含回帖/转发。点芯片即可放宽。"),
+        .collect();
+    let has_chips = !chips.is_empty();
+    surface_card(
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap(px(space::MD))
+            .px(px(space::MD))
+            .py(px(space::SM)),
+    )
+    .child(
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap(px(space::SM))
+            .child(toggle_chip(
+                "filter-drawer-toggle",
+                {
+                    let n = state.applied_chips().len();
+                    if state.filter_drawer_open {
+                        format!("收起筛选 · {n}")
+                    } else {
+                        format!("筛选 · {n}")
+                    }
+                },
+                state.filter_drawer_open,
+                cx.listener(|this, _, _window, cx| this.toggle_filter_drawer(cx)),
+            ))
+            .child(toggle_chip(
+                "sort-summary",
+                format!("排序：{}", state.applied_filter.sort.label_zh()),
+                false,
+                cx.listener(|this, _, _window, cx| {
+                    this.filter_drawer_open = true;
+                    cx.notify();
+                }),
+            ))
+            .children(chips)
+            .when(has_chips, |el| {
+                el.child(btn(
+                    "toolbar-clear-filters",
+                    "清除全部",
+                    false,
+                    !state.loading,
+                    cx.listener(|this, _, _window, cx| {
+                        this.filter_draft = crate::app::FilterDraft::unrestricted();
+                        this.apply_filters(cx);
+                        cx.notify();
+                    }),
+                ))
+            }),
+    )
+    .child(
+        div()
+            .id("slice-to-insights")
+            .flex()
+            .flex_col()
+            .items_end()
+            .cursor_pointer()
+            .hover(|s| s.opacity(0.8))
+            .on_click(cx.listener(|this, _, _window, cx| {
+                this.set_route(Route::Insights, cx);
+            }))
+            .child(
+                theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED)))
+                    .child("当前切片 · 点此看洞察"),
             )
-        })
-        .child(
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap(px(space::SM))
-                .child(
-                    theme::type_meta(div().text_color(theme::c(theme::TEXT_MUTED)))
-                        .child(active_filter_summary(state)),
-                )
-                .child(kpi("结果", s.count.to_string()))
-                .child(kpi("平均曝光", format!("{:.0}", s.avg_views)))
-                .child(kpi(
-                    "均互率",
-                    xmanager_core::Tweet::format_rate(s.avg_engagement_rate),
-                )),
-        )
+            .child(
+                theme::type_label(div().text_color(theme::c(theme::TEXT)))
+                    .child(state.slice_stats_line()),
+            ),
+    )
 }
 
 pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
@@ -258,10 +235,9 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_wrap()
         .items_center()
         .gap(px(space::SM))
-        .min_h(px(56.))
-        .px(px(space::LG))
+        .min_h(px(52.))
+        .px(px(space::MD))
         .py(px(space::SM))
-        .bg(theme::c(theme::BG_PANEL))
         .border_t_1()
         .border_color(theme::c(theme::BORDER))
         .child(
@@ -271,14 +247,11 @@ pub fn render_bulk_bar(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 theme::c(theme::TEXT_MUTED)
             }))
             .child(if has_selection {
-                format!(
-                    "已选 {} 条。可直接删除，或加入安全清理复核。",
-                    state.selected.len()
-                )
+                format!("已选 {} 条", state.selected.len())
             } else if has_focus {
-                "已查看当前推文，可删除或加入安全清理（不会离开本页）".into()
+                "已查看当前推文".into()
             } else {
-                "勾选左侧方框，或点开一条后删除 / 加入安全清理".into()
+                "已选 0 条".into()
             }),
         )
         .child(btn(

@@ -169,6 +169,18 @@ impl Tweet {
             raw.to_string()
         }
     }
+
+    /// Compact month-day for dense tables (`MM-DD`).
+    pub fn display_date_short(&self) -> String {
+        let Some(raw) = self.created_at.as_deref() else {
+            return "-".into();
+        };
+        if raw.len() >= 10 && raw.as_bytes().get(4) == Some(&b'-') {
+            raw[5..10].to_string()
+        } else {
+            self.display_date()
+        }
+    }
 }
 
 fn rate(num: u64, views: u64) -> f64 {

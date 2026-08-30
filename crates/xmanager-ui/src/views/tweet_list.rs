@@ -7,16 +7,12 @@ use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window
 use xmanager_core::{SortField, SortOrder, Tweet};
 
 const COL_CHECK: f32 = 32.0;
-const COL_KIND: f32 = 36.0;
-const COL_DATE: f32 = 108.0;
-const COL_VIEWS: f32 = 64.0;
-const COL_LIKES: f32 = 48.0;
-const COL_BM: f32 = 48.0;
-const COL_LIKE_R: f32 = 56.0;
-const COL_BM_R: f32 = 56.0;
-const COL_ENG_R: f32 = 56.0;
-const CARD_ROW_H: f32 = 92.0;
-const TABLE_ROW_H: f32 = 44.0;
+const COL_KIND: f32 = 32.0;
+const COL_DATE: f32 = 56.0;
+const COL_VIEWS: f32 = 56.0;
+const CARD_ROW_H: f32 = 88.0;
+const TABLE_ROW_H: f32 = 56.0;
+const CONTENT_LINES_H: f32 = 40.0;
 
 fn header_cell(label: &str, width: f32) -> Div {
     theme::type_meta(
@@ -131,37 +127,6 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .border_color(theme::c(theme::BORDER))
         .child(header_cell("", COL_CHECK))
         .child(header_cell("类型", COL_KIND))
-        .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
-        .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
-        .child(sort_header("赞", COL_LIKES, SortField::LikeRate, state, cx))
-        .child(sort_header(
-            "藏",
-            COL_BM,
-            SortField::BookmarkRate,
-            state,
-            cx,
-        ))
-        .child(sort_header(
-            "赞率",
-            COL_LIKE_R,
-            SortField::LikeRate,
-            state,
-            cx,
-        ))
-        .child(sort_header(
-            "藏率",
-            COL_BM_R,
-            SortField::BookmarkRate,
-            state,
-            cx,
-        ))
-        .child(sort_header(
-            "互率",
-            COL_ENG_R,
-            SortField::EngagementRate,
-            state,
-            cx,
-        ))
         .child(
             div().flex_1().px(px(space::SM)).child(
                 theme::type_meta(
@@ -172,6 +137,8 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .child("内容"),
             ),
         )
+        .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
+        .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
 }
 
 fn skeleton_bar(width: f32, muted: bool) -> Div {
@@ -211,13 +178,6 @@ fn skeleton_row(ix: usize) -> Div {
         .border_color(theme::c(theme::BORDER))
         .child(skeleton_cell(14., COL_CHECK, muted))
         .child(skeleton_cell(20., COL_KIND, muted))
-        .child(skeleton_cell(DATE_W[ix], COL_DATE, muted))
-        .child(skeleton_cell(VIEWS_W[ix], COL_VIEWS, muted))
-        .child(skeleton_cell(28., COL_LIKES, muted))
-        .child(skeleton_cell(28., COL_BM, muted))
-        .child(skeleton_cell(32., COL_LIKE_R, muted))
-        .child(skeleton_cell(32., COL_BM_R, muted))
-        .child(skeleton_cell(32., COL_ENG_R, muted))
         .child(
             div()
                 .flex_1()
@@ -227,6 +187,8 @@ fn skeleton_row(ix: usize) -> Div {
                 .items_center()
                 .child(skeleton_bar(CONTENT_W[ix], muted)),
         )
+        .child(skeleton_cell(DATE_W[ix], COL_DATE, muted))
+        .child(skeleton_cell(VIEWS_W[ix], COL_VIEWS, muted))
 }
 
 fn first_load_skeleton(title: &'static str, detail: &'static str) -> Div {
@@ -384,14 +346,9 @@ fn tweet_table_row(
     let id = tweet.id.clone();
     let row_id = id.clone();
     let kind = tweet.kind();
-    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 64);
+    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 120);
     let views = tweet.views();
-    let likes = tweet.public_metrics.like_count;
-    let bookmarks = tweet.public_metrics.bookmark_count;
-    let like_r = Tweet::format_rate(tweet.like_rate());
-    let bm_r = Tweet::format_rate(tweet.bookmark_rate());
-    let eng_r = Tweet::format_rate(tweet.engagement_rate());
-    let date = tweet.display_date();
+    let date = tweet.display_date_short();
 
     div()
         .id(SharedString::from(format!("tweet-row-{id}")))
@@ -406,7 +363,7 @@ fn tweet_table_row(
         .cursor_pointer()
         .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
         .on_click(cx.listener(move |this, _, _w, cx| {
-            this.focus_tweet(&row_id, cx);
+            this.toggle_tweet_focus(&row_id, cx);
         }))
         .child(row_checkbox(id, selected, cx))
         .child(
@@ -414,30 +371,25 @@ fn tweet_table_row(
                 div()
                     .w(px(COL_KIND))
                     .flex_none()
-                    .px(px(space::SM))
+                    .px(px(space::XS))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(kind_color(kind)),
             )
             .child(kind.short()),
         )
-        .child(cell(date, COL_DATE, true))
-        .child(cell(format!("{views}"), COL_VIEWS, false))
-        .child(cell(format!("{likes}"), COL_LIKES, false))
-        .child(cell(format!("{bookmarks}"), COL_BM, false))
-        .child(cell(like_r, COL_LIKE_R, false))
-        .child(cell(bm_r, COL_BM_R, false))
-        .child(cell(eng_r, COL_ENG_R, false))
         .child(
             div().flex_1().min_w(px(0.)).px(px(space::SM)).child(
                 theme::type_body(
                     div()
+                        .h(px(CONTENT_LINES_H))
                         .text_color(theme::c(theme::TEXT))
-                        .overflow_hidden()
-                        .whitespace_nowrap(),
+                        .overflow_hidden(),
                 )
                 .child(text_preview),
             ),
         )
+        .child(cell(date, COL_DATE, true))
+        .child(cell(format!("{views}"), COL_VIEWS, false))
 }
 
 fn tweet_card_row(
@@ -450,11 +402,9 @@ fn tweet_card_row(
     let id = tweet.id.clone();
     let row_id = id.clone();
     let kind = tweet.kind();
-    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 80);
+    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 100);
     let views = tweet.views();
-    let likes = tweet.public_metrics.like_count;
-    let bookmarks = tweet.public_metrics.bookmark_count;
-    let date = tweet.display_date();
+    let date = tweet.display_date_short();
 
     div()
         .id(SharedString::from(format!("tweet-row-{id}")))
@@ -471,7 +421,7 @@ fn tweet_card_row(
         .cursor_pointer()
         .hover(|s| s.bg(theme::c(theme::BG_HOVER)))
         .on_click(cx.listener(move |this, _, _w, cx| {
-            this.focus_tweet(&row_id, cx);
+            this.toggle_tweet_focus(&row_id, cx);
         }))
         .child(row_checkbox(id, selected, cx))
         .child(
@@ -488,54 +438,22 @@ fn tweet_card_row(
                         .flex_wrap()
                         .gap_2()
                         .child(labeled_field("类型", kind.label_zh(), kind_color(kind)))
-                        .child(labeled_field("日期", date, theme::c(theme::TEXT_MUTED))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .gap_2()
+                        .child(labeled_field("日期", date, theme::c(theme::TEXT_MUTED)))
                         .child(labeled_field(
                             "曝光",
                             format!("{views}"),
                             theme::c(theme::TEXT),
-                        ))
-                        .child(labeled_field(
-                            "赞",
-                            format!("{likes}"),
-                            theme::c(theme::TEXT),
-                        ))
-                        .child(labeled_field(
-                            "藏",
-                            format!("{bookmarks}"),
-                            theme::c(theme::TEXT),
                         )),
                 )
                 .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_1()
-                        .min_w(px(0.))
-                        .child(
-                            div()
-                                .text_xs()
-                                .flex_none()
-                                .text_color(theme::c(theme::TEXT_MUTED))
-                                .child("内容"),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .text_xs()
-                                .text_color(theme::c(theme::TEXT))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .child(text_preview),
-                        ),
+                    theme::type_body(
+                        div()
+                            .h(px(CONTENT_LINES_H))
+                            .min_w(px(0.))
+                            .text_color(theme::c(theme::TEXT))
+                            .overflow_hidden(),
+                    )
+                    .child(text_preview),
                 ),
         )
 }
@@ -549,7 +467,6 @@ pub fn render_tweet_list(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex_col()
         .flex_1()
         .min_h(px(0.))
-        .bg(theme::c(theme::BG))
         .when(!as_cards, |el| el.child(table_header(state, cx)))
         .child(if count == 0 {
             empty_state(state, cx).into_any_element()

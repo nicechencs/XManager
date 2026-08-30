@@ -14,8 +14,9 @@ pub use config::{looks_like_user_access_token, CredentialLayout, CredentialPrese
 pub use error::{Error, Result};
 pub use export::{export_auto, export_csv, export_json, load_tweets_file, parse_tweets_json};
 pub use filter::{
-    filter_tweets, parse_created_at, summarize, view_bucket_bounds, view_histogram, FilterOptions,
-    KindFilter, SortField, SortOrder, Summary, TimeRange, VIEW_BUCKETS,
+    bucket_overlaps_view_filter, filter_tweets, parse_created_at, summarize, view_bucket_bounds,
+    view_histogram, FilterOptions, KindFilter, SortField, SortOrder, Summary, TimeRange,
+    VIEW_BUCKETS,
 };
 pub use logging::{Level as LogLevel, LogConfig, Outcome as LogOutcome, Stream as LogStream};
 pub use models::{

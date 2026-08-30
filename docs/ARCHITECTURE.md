@@ -58,9 +58,9 @@ XManager/
 - **筛选**：抽屉改条件后立刻写入 `applied_filter` 并重算列表。拉取条数 / 含转发与筛选分开，只影响下次 API 请求。chip 只显示非默认条件，可逐个移除。
 - **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。加入候选不切页；`cleanup_notice` 横幅提供「去安全清理」。内容库「删除选中」走独立确认，不要求先加入候选。
 - **视觉**：色板、字号、行高、间距 token 在 `xmanager-ui` 的 `theme.rs`，约定见 [DESIGN.md](DESIGN.md)。
-- **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
-- **列表**：`uniform_list` 虚拟化渲染筛选结果。
-- **洞察**：KPI + 直方图 + 当前筛选 Top-N 排名（点击回内容库并聚焦）。
+- **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。宽屏检查器仅在选中推文时占列；窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
+- **列表**：`uniform_list` 虚拟化渲染筛选结果。正文优先（两行），日期与曝光为次要列。
+- **洞察**：全部已同步数据的汇总 + 曝光直方图（当前切片高亮）；点柱或预设回内容库。
 
 ## 数据流
 
@@ -86,8 +86,8 @@ tweets[] → FilterOptions
 | 拉取时间线 | `fetch_own_tweets` | 内容库拉取 + 最后同步时间 |
 | 时间段 / 类型 / 比率排序 | `TimeRange` `KindFilter` `SortField` | 筛选抽屉 + 可移除 chip |
 | 低曝光筛选 | `FilterOptions` | ≤10/20/50/100 快捷 |
-| 统计 | `summarize` / histogram | 数据洞察；直方图可点筛选 |
-| 排名 | 当前 `filtered` 顺序 | 洞察 Top-N 列表，点击回内容库 |
+| 统计 | `summarize` / histogram | 洞察看 `all_tweets`；当前筛选为切片高亮 |
+| 排名 | 低曝光样本 | 洞察 5 条样本，点击回内容库并聚焦 |
 | 导出 | `export_csv` / `export_json` | 内容库 / 洞察 / 清理备份 |
 | 安全删除 | `lookup_tweets` + `delete_tweet(s)` | 加入后留在内容库；「删除 N 条」自动备份+预演 → 确认一次 → 真删 |
 | 本地日志 | `logging` | 启动初始化；API / 导出 / 清理审计（见 [LOGGING.md](LOGGING.md)） |

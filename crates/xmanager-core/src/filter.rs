@@ -284,6 +284,25 @@ pub fn view_bucket_bounds(label: &str) -> Option<(u64, Option<u64>)> {
         .map(|(_, lo, hi)| (*lo, *hi))
 }
 
+/// True when a histogram bucket intersects the current view filter.
+/// No highlight when the library is not bounding views.
+pub fn bucket_overlaps_view_filter(
+    label: &str,
+    min_views: Option<u64>,
+    max_views: Option<u64>,
+) -> bool {
+    if min_views.is_none() && max_views.is_none() {
+        return false;
+    }
+    let Some((lo, hi)) = view_bucket_bounds(label) else {
+        return false;
+    };
+    let filter_lo = min_views.unwrap_or(0);
+    let filter_hi = max_views.unwrap_or(u64::MAX);
+    let bucket_hi = hi.unwrap_or(u64::MAX);
+    lo <= filter_hi && bucket_hi >= filter_lo
+}
+
 /// Filter tweets by views / rates / age / kind, then sort (and optional top-N).
 pub fn filter_tweets(tweets: &[Tweet], opts: &FilterOptions) -> Vec<Tweet> {
     let now = Utc::now();
@@ -585,6 +604,20 @@ mod tests {
         assert_eq!(view_bucket_bounds("11–50"), Some((11, Some(50))));
         assert_eq!(view_bucket_bounds("1000+"), Some((1001, None)));
         assert_eq!(view_bucket_bounds("missing"), None);
+    }
+
+    #[test]
+    fn bucket_highlight_follows_view_slice() {
+        assert!(bucket_overlaps_view_filter("0–10", None, Some(50)));
+        assert!(bucket_overlaps_view_filter("11–50", None, Some(50)));
+        assert!(!bucket_overlaps_view_filter("51–100", None, Some(50)));
+        assert!(!bucket_overlaps_view_filter("1000+", None, Some(50)));
+        assert!(bucket_overlaps_view_filter("1000+", Some(1001), None));
+        assert!(!bucket_overlaps_view_filter("0–10", None, None));
+        let mut t = tweet("1", 1, 0, "2026-08-30T11:11:00Z", PostKind::Original);
+        t.created_at = Some("2026-08-30T11:11:00Z".into());
+        assert_eq!(t.display_date_short(), "08-30");
+        assert_eq!(t.display_date(), "2026-08-30 11:11");
     }
 
     #[test]

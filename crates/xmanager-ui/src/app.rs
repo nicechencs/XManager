@@ -60,9 +60,9 @@ impl LayoutMode {
         }
     }
 
-    /// Side-column inspector: Wide only. Medium/Narrow use an overlay drawer.
-    pub fn library_shows_inspector(self, _has_focus: bool) -> bool {
-        matches!(self, Self::Wide)
+    /// Side-column inspector: Wide, and only while a tweet is focused.
+    pub fn library_shows_inspector(self, has_focus: bool) -> bool {
+        matches!(self, Self::Wide) && has_focus
     }
 
     /// Narrow replaces the list with a full-height filter overlay.
@@ -769,7 +769,11 @@ pub struct AppState {
     pub loading: bool,
     pub status_msg: SharedString,
     pub error_msg: Option<SharedString>,
+    /// Stats for the current library slice (`filtered`).
     pub summary: Summary,
+    /// Stats for the full synced set (`all_tweets`). Insights uses this.
+    pub all_summary: Summary,
+    /// View histogram over `all_tweets` (not the current slice).
     pub histogram: Vec<(String, usize)>,
     /// Last successful tweet sync timestamp (local time display string).
     pub last_synced_at: Option<SharedString>,
@@ -871,6 +875,7 @@ impl AppState {
             status_msg: SharedString::from("就绪"),
             error_msg: None,
             summary: Summary::default(),
+            all_summary: Summary::default(),
             histogram: Vec::new(),
             last_synced_at: None,
             layout_mode: LayoutMode::Wide,
@@ -974,7 +979,25 @@ impl AppState {
             self.focused_tweet_id = None;
         }
         self.summary = summarize(&self.filtered);
-        self.histogram = view_histogram(&self.filtered);
+        self.all_summary = summarize(&self.all_tweets);
+        self.histogram = view_histogram(&self.all_tweets);
+    }
+
+    pub fn slice_stats_line(&self) -> String {
+        format!(
+            "{} 条 · 均曝光 {:.0} · 均互率 {}",
+            self.summary.count,
+            self.summary.avg_views,
+            Tweet::format_rate(self.summary.avg_engagement_rate)
+        )
+    }
+
+    /// Lowest-view tweets in the synced set, for the insights sample list.
+    pub fn lowest_view_samples(&self, n: usize) -> Vec<Tweet> {
+        let mut tweets = self.all_tweets.clone();
+        tweets.sort_by(|a, b| a.views().cmp(&b.views()).then_with(|| a.id.cmp(&b.id)));
+        tweets.truncate(n);
+        tweets
     }
 
     pub fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
@@ -992,8 +1015,9 @@ impl AppState {
 
     /// Toggle the appearance without changing route, filters, selections, or
     /// cleanup state. GPUI is notified so the full tree is rendered instantly.
-    pub fn toggle_theme(&mut self, cx: &mut Context<Self>) {
-        self.theme_mode = crate::theme::toggle_mode();
+    pub fn set_theme_mode(&mut self, mode: crate::theme::ThemeMode, cx: &mut Context<Self>) {
+        crate::theme::set_mode(mode);
+        self.theme_mode = mode;
         cx.notify();
     }
 
@@ -1480,8 +1504,7 @@ impl AppState {
                 } else if self.filter_drawer_open {
                     self.filter_drawer_open = false;
                     cx.notify();
-                } else if self.focused_tweet_id.is_some() && self.layout_mode.inspector_as_overlay()
-                {
+                } else if self.focused_tweet_id.is_some() {
                     self.focused_tweet_id = None;
                     cx.notify();
                 } else {
@@ -1562,6 +1585,49 @@ impl AppState {
 
     pub fn focus_tweet(&mut self, id: &str, cx: &mut Context<Self>) {
         self.focused_tweet_id = Some(id.to_string());
+        cx.notify();
+    }
+
+    pub fn toggle_tweet_focus(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.focused_tweet_id.as_deref() == Some(id) {
+            self.focused_tweet_id = None;
+            cx.notify();
+        } else {
+            self.focus_tweet(id, cx);
+        }
+    }
+
+    /// Open a tweet in the library, loosening view/kind bounds if it is filtered out.
+    pub fn open_tweet_in_library(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        let tweet = self.all_tweets.iter().find(|t| t.id == id).cloned();
+        if let Some(tweet) = tweet {
+            let views = tweet.views();
+            let mut loosened = false;
+            if self.filter_draft.max_views.is_some_and(|max| views > max) {
+                self.filter_draft.max_views = None;
+                loosened = true;
+            }
+            if self.filter_draft.min_views.is_some_and(|min| views < min) {
+                self.filter_draft.min_views = None;
+                loosened = true;
+            }
+            if !self.filter_draft.kinds.allows(tweet.kind()) {
+                self.filter_draft.kinds = KindFilter::all();
+                loosened = true;
+            }
+            if self.filter_draft.top_n.is_some() && !self.filtered.iter().any(|t| t.id == id) {
+                self.filter_draft.top_n = None;
+                loosened = true;
+            }
+            if loosened {
+                self.apply_filters(cx);
+            }
+        }
+        self.focus_tweet(id, cx);
+        self.active_route = Route::Library;
         cx.notify();
     }
 
@@ -2658,7 +2724,8 @@ mod tests {
         assert!(LayoutMode::Wide.show_nav_labels());
         assert!(!LayoutMode::Medium.show_nav_labels());
         assert!(LayoutMode::Narrow.inspector_width() > 0.0);
-        assert!(LayoutMode::Wide.library_shows_inspector(false));
+        assert!(!LayoutMode::Wide.library_shows_inspector(false));
+        assert!(LayoutMode::Wide.library_shows_inspector(true));
         assert!(!LayoutMode::Medium.library_shows_inspector(false));
         assert!(!LayoutMode::Medium.library_shows_inspector(true));
         assert!(!LayoutMode::Narrow.library_shows_inspector(false));
@@ -2671,5 +2738,8 @@ mod tests {
         assert!(LayoutMode::Narrow.filter_as_overlay());
         assert!(LayoutMode::Narrow.inspector_as_overlay());
         assert!(LayoutMode::Narrow.tweet_list_as_cards());
+        assert_eq!(LayoutMode::Wide.label_zh(), "宽屏");
+        assert_eq!(LayoutMode::Medium.label_zh(), "中屏");
+        assert_eq!(LayoutMode::Narrow.label_zh(), "窄屏");
     }
 }

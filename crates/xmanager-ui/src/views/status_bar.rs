@@ -40,10 +40,8 @@ pub fn render_status_bar(state: &AppState) -> Div {
             .child(state.status_msg.clone()),
         )
         .child(
-            theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM))).child(format!(
-                "布局 {} · J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页 · Esc 关闭",
-                state.layout_mode.label_zh()
-            )),
+            theme::type_meta(div().text_color(theme::c(theme::TEXT_DIM)))
+                .child("J/K 上下 · 空格勾选 · / 筛选 · 1–3 切页 · Esc 关闭检查器"),
         )
         .child(status_pill(creds_ok, state.credentials_msg.clone()))
 }
