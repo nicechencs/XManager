@@ -39,6 +39,21 @@ macOS
 This build is not notarized. The xattr step is required until an Apple
 Developer ID is used.
 
+Upgrading
+---------
+Download the new release zip from GitHub Releases and replace the
+program files only:
+
+  Windows: overwrite XManager.exe (and xmanager-cli.exe)
+  macOS:   replace XManager.app in /Applications
+
+Keep your `.env` in place - credentials, logs, and exported backups live
+outside the program and survive upgrades untouched.
+
+Newer builds (v0.2.0+) can update themselves: the app checks GitHub
+Releases on startup and offers "download and install" in-app. Updating
+from an older portable build still requires the manual steps above once.
+
 Deleting tweets
 ---------------
 Library "删除选中" asks once, writes a CSV backup, then calls the X API.

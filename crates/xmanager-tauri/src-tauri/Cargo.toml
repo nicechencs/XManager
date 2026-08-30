@@ -22,6 +22,8 @@ custom-protocol = ["tauri/custom-protocol"]
 xmanager-core.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

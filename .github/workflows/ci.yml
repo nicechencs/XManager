@@ -38,6 +38,9 @@ jobs:
       - name: Release version helper tests
         run: python3 scripts/release_version.py --self-test
 
+      - name: Update manifest helper tests
+        run: python3 scripts/generate_update_manifest.py --self-test
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

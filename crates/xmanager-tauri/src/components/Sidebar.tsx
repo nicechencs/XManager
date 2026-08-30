@@ -1,5 +1,6 @@
 import type { RouteView, UiSnapshot } from "../types";
 import { store } from "../hooks";
+import { checkForUpdate } from "../update";
 import { Btn, CountBadge, StatusPill } from "./common";
 
 export type ThemeMode = "light" | "dark";
@@ -54,6 +55,17 @@ export function Sidebar({
               ? `${snapshot.all_tweets.length} 条 · 同步 ${synced}`
               : `${snapshot.all_tweets.length} 条 · 尚未同步`}
         </div>
+        <Btn
+          variant="ghost"
+          disabled={snapshot.loading}
+          onClick={() =>
+            void checkForUpdate(true, (message) => {
+              void store.dispatch({ type: "set_status", message });
+            })
+          }
+        >
+          {compact ? "更新" : "检查更新"}
+        </Btn>
         <Btn
           variant="ghost"
           disabled={snapshot.loading}

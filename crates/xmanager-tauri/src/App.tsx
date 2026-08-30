@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { layoutFromWidth, store, useAppState, useDrawerOpen } from "./hooks";
 import { applyTheme, loadThemeMode, saveThemeMode, type ThemeMode } from "./theme";
 import { resolveShortcut } from "./shortcuts";
+import { checkForUpdate } from "./update";
 import { Sidebar } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { LibraryPage } from "./components/library/LibraryPage";
 import { InsightsPage } from "./components/insights/InsightsPage";
 import { CleanupPage } from "./components/cleanup/CleanupPage";
@@ -43,6 +45,9 @@ export default function App() {
 
   useEffect(() => {
     void store.initialize();
+    // Silent update check shortly after startup; failures stay quiet.
+    const timer = window.setTimeout(() => void checkForUpdate(false), 3000);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -94,6 +99,7 @@ export default function App() {
 
   return (
     <div className={`app-root layout-${layout}`}>
+      <UpdateBanner />
       {snapshot.error_msg !== null ? <ErrorBanner message={snapshot.error_msg} /> : null}
       <div className="app-body">
         <Sidebar snapshot={snapshot} compact={layout !== "wide"} themeMode={themeMode} onThemeChange={changeTheme} />
