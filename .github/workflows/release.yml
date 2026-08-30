@@ -1,0 +1,328 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Native Windows + macOS builds, then a draft GitHub Release.
+# Pattern follows AgentHub (tag-triggered, pinned actions, rust-cache,
+# publish job is the only writer) without Tauri updater/signing.
+# GPUI cannot be cross-compiled; each OS builds on its own runner.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    steps:
+      - name: Require a version tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *)
+              echo "Releases may only run from a v* tag; received $GITHUB_REF" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout tagged commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Require tagged commit is on origin/dev or origin/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          for branch in dev main; do
+            if git fetch --no-tags origin "$branch" && git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+              echo "Tag $GITHUB_REF_NAME is on origin/$branch"
+              found=1
+            fi
+          done
+          if [ "$found" -ne 1 ]; then
+            echo "Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on origin/dev or origin/main." >&2
+            echo "Merge to dev or main first, then tag that commit." >&2
+            exit 1
+          fi
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "."
+
+      - name: Release version helper tests
+        run: python3 scripts/release_version.py --self-test
+
+      - name: Validate tag matches Cargo.toml
+        id: metadata
+        run: |
+          python3 scripts/release_version.py \
+            --cargo Cargo.toml \
+            --expect-tag "$GITHUB_REF_NAME" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Test core + CLI
+        run: cargo test -p xmanager-core -p xmanager-cli --locked --all-targets
+
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.metadata.outputs.tag }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "XManager ${TAG}"
+            echo
+            echo "Windows x64 zip and macOS universal \`.app\` (Intel + Apple Silicon)."
+            echo "Builds are **unsigned**. See \`README.txt\` inside each zip for SmartScreen / Gatekeeper."
+            echo
+            echo "Put \`.env\` next to the program, or in the user config directory."
+            echo
+            echo "## Commits"
+            prev="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+            if [ -n "$prev" ]; then
+              git log "${prev}..HEAD" --pretty=format:'- %s (%h)'
+              echo
+            else
+              git log -20 --pretty=format:'- %s (%h)'
+              echo
+            fi
+          } > release-notes.md
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (x64)
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "."
+
+      - name: Test workspace
+        run: cargo test --workspace --locked --all-targets
+
+      - name: Build release binaries
+        run: cargo build --release --locked -p xmanager-ui -p xmanager-cli
+
+      - name: Package zip
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          .\scripts\package-windows.ps1 `
+            -Version $env:VERSION `
+            -Ui target\release\xmanager.exe `
+            -Cli target\release\xmanager-cli.exe `
+            -Out dist
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows
+          path: dist/XManager-${{ needs.validate.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS (universal)
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Require Apple Silicon runner
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) ;;
+            *) echo "macos-15 release builds must run on ARM64; found $(uname -m)" >&2; exit 1 ;;
+          esac
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: "."
+
+      - name: Test workspace
+        run: cargo test --workspace --locked --all-targets
+
+      - name: Build Apple Silicon
+        run: cargo build --release --locked --target aarch64-apple-darwin -p xmanager-ui -p xmanager-cli
+
+      - name: Build Intel
+        run: cargo build --release --locked --target x86_64-apple-darwin -p xmanager-ui -p xmanager-cli
+
+      - name: Package .app zip
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/package-macos.sh
+          ./scripts/package-macos.sh \
+            --version "$VERSION" \
+            --ui-arm target/aarch64-apple-darwin/release/xmanager \
+            --ui-x64 target/x86_64-apple-darwin/release/xmanager \
+            --cli-arm target/aarch64-apple-darwin/release/xmanager-cli \
+            --cli-x64 target/x86_64-apple-darwin/release/xmanager-cli \
+            --out dist
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
+          path: dist/XManager-${{ needs.validate.outputs.version }}-macos-universal.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish draft GitHub Release
+    needs:
+      - validate
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download Windows zip
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-windows
+          path: artifacts/windows
+
+      - name: Download macOS zip
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-macos
+          path: artifacts/macos
+
+      - name: Download release notes
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-notes
+          path: artifacts/notes
+
+      - name: Checksums and upload draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "Releases may only publish from refs/tags/$TAG; received $GITHUB_REF" >&2
+            exit 1
+          fi
+          mkdir -p release-assets
+          find artifacts -type f -name '*.zip' -exec cp {} release-assets/ \;
+          notes="$(find artifacts/notes -type f -name 'release-notes.md' | head -n 1)"
+          if [ -z "$notes" ] || [ ! -f "$notes" ]; then
+            echo "Missing release-notes.md" >&2
+            find artifacts -type f >&2
+            exit 1
+          fi
+          cd release-assets
+          win="XManager-${VERSION}-windows-x64.zip"
+          mac="XManager-${VERSION}-macos-universal.zip"
+          for f in "$win" "$mac"; do
+            if [ ! -f "$f" ]; then
+              echo "Missing asset $f" >&2
+              find . -type f >&2
+              exit 1
+            fi
+          done
+          sha256sum "$win" "$mac" | tee SHA256SUMS.txt
+          cd ..
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "XManager $TAG" \
+              --notes-file "$notes" \
+              --draft
+          elif [ "$PRERELEASE" = true ]; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "XManager $TAG" \
+              --notes-file "$notes" \
+              --draft \
+              --verify-tag \
+              --prerelease \
+              release-assets/*
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "XManager $TAG" \
+              --notes-file "$notes" \
+              --draft \
+              --verify-tag \
+              release-assets/*
+          fi
+
+          echo "Draft release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          echo "Review the zip files, then click Publish in the GitHub UI."

@@ -4,6 +4,8 @@
 
 主程序为 **Rust + GPUI** 桌面应用；领域逻辑在 `xmanager-core`。
 
+[![CI](https://github.com/nicechencs/XManager/actions/workflows/ci.yml/badge.svg)](https://github.com/nicechencs/XManager/actions/workflows/ci.yml)
+
 ## 功能
 
 - 拉取自己的推文（含 `impression_count` **曝光**）
@@ -18,7 +20,7 @@
 - 直方图区间点击可回到内容库并应用对应曝光筛选
 - 导出 CSV / JSON（内容库 / 洞察 / 清理备份）
 - 浅色 / 深色外观切换；字号 / 行高 / 间距见 [docs/DESIGN.md](docs/DESIGN.md)
-- **安全删除**：内容库勾选后点「删除选中」→ 确认一次（自动备份到 `exports/`）→ 立即删除，不必先去安全清理。安全清理仍可作为可选复核盘。遇 HTTP 429 立即停止后续删除。
+- **安全删除**：内容库勾选后点「删除选中」→ 确认一次（自动备份到导出目录）→ 立即删除，不必先去安全清理。安全清理仍可作为可选复核盘。遇 HTTP 429 立即停止后续删除。
 - 响应式：宽屏三栏；中屏紧凑导航；窄屏筛选/检查器为全高覆盖层，列表改为带字段标签的卡片
 - 列表虚拟化；刷新中保留旧数据并提示；空状态区分无凭证 / 无数据 / 无匹配
 
@@ -30,6 +32,8 @@ XManager/
 ├── .env.example
 ├── run.sh                     # macOS / Linux 启动
 ├── run.bat                    # Windows 启动
+├── packaging/                 # 发版 zip 说明与 macOS Info.plist
+├── scripts/                   # Windows / macOS 打包
 ├── crates/
 │   ├── xmanager-core/         # API · 筛选 · 导出
 │   ├── xmanager-cli/          # 命令行（JSON stdout）
@@ -37,9 +41,10 @@ XManager/
 └── docs/ARCHITECTURE.md
 └── docs/DESIGN.md             # 字号 / 间距 / 交互约定
 └── docs/LOGGING.md            # 日志命名 / 保留 / 事件目录
+└── docs/RELEASE.md            # tag / GitHub Actions 发版
 ```
 
-详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、[docs/DESIGN.md](docs/DESIGN.md) 与 [docs/LOGGING.md](docs/LOGGING.md)。
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)、[docs/DESIGN.md](docs/DESIGN.md)、[docs/LOGGING.md](docs/LOGGING.md) 与 [docs/RELEASE.md](docs/RELEASE.md)。
 
 ## 前置条件
 
@@ -74,7 +79,22 @@ cp .env.example .env
 2. **按量付费（pay-per-use）额度** 开着，否则读自己的时间线会 403。
 3. 侧栏「凭证已配置」只检查四项是否非空，**不会联网 whoami**。点「刷新状态」才做一次真实校验。
 
-可选日志变量：`XMANAGER_LOG_DIR`（默认 `logs`）、`XMANAGER_LOG_LEVEL`（`debug` / `info` / `warn` / `error`）。
+可选日志变量：`XMANAGER_LOG_DIR`（不设则跟数据目录下的 `logs/`）、`XMANAGER_LOG_LEVEL`（`debug` / `info` / `warn` / `error`）、`XMANAGER_DATA_DIR`（同时改日志和导出的根目录）。
+
+### `.env` / 日志 / 导出放哪
+
+桌面端和 CLI 会找**第一个存在的** `.env`（文件里的值覆盖已有环境变量）：
+
+1. 可执行文件旁边（macOS `.app` 还会看 `.app` 所在文件夹和 `Contents/Resources`）。`cargo` 的 `target/` 目录会跳过，避免开发时误读。
+2. `XMANAGER_DATA_DIR/.env`（若设置了该变量）
+3. 当前工作目录，以及向上两级（仓库里 `cargo run` 仍然可用）
+4. 用户配置目录：Windows `%APPDATA%\XManager`，macOS `~/Library/Application Support/XManager`
+
+日志和导出（`logs/`、`exports/`）：
+
+- 在仓库里跑（当前目录有 `Cargo.toml` / `.env` / `.env.example`）：仍写在当前目录
+- 打包后的程序：可执行文件旁边若已有 `.env`（解压即用的 zip），就写在那一档；否则写到上面的用户配置目录
+- `XMANAGER_LOG_DIR` 只覆盖日志目录
 
 ### Developer Portal 简要步骤
 
@@ -82,6 +102,22 @@ cp .env.example .env
 2. 开通按量付费访问  
 3. User authentication 设为 **Read and write**，再 **Regenerate** User Access Token  
 4. 按上表把 Consumer Key/Secret 与 Access Token/Secret **对号**写入 `.env`（不要交叉粘贴）
+
+## 下载
+
+正式包在 [GitHub Releases](https://github.com/nicechencs/XManager/releases)：
+
+- Windows：`XManager-*-windows-x64.zip`（解压后双击 `XManager.exe`）
+- macOS：`XManager-*-macos-universal.zip`（Intel 与 Apple Silicon 同一个 `.app`）
+
+构建**未签名**。Windows 若出现 SmartScreen，选「更多信息」→「仍要运行」。macOS 若提示无法验证开发者：
+
+```bash
+xattr -cr XManager.app
+open XManager.app
+```
+
+或按住 Control 点图标 → 打开。把 `.env` 放在程序旁边或用户配置目录，见上文。发版步骤见 [docs/RELEASE.md](docs/RELEASE.md)。
 
 ## 构建与运行
 
@@ -97,7 +133,7 @@ cp .env.example .env
 **所有平台**
 
 1. Rust stable（已在 `1.89+` 验证）：https://rustup.rs
-2. 仓库根目录的 `.env`（见上文）
+2. `.env`：开发时放仓库根目录；打包后放程序旁边或用户配置目录（见上文）
 
 **macOS**
 
@@ -208,7 +244,7 @@ cargo test -p xmanager-cli -- --ignored   # 可选：打真实 API（whoami）
 1. 确认侧栏凭证状态为已配置  
 2. 在**内容库**打开筛选：时间段、类型、排序、Top-N、低曝光快捷  
 3. 打开 **筛选**：改时间、类型、曝光或排序后列表立即更新；需要更多数据时再点 **拉取并分析**  
-4. 勾选左侧方框（或点开一条）→ **删除选中** → 确认一次（自动备份到 `exports/`，仍留在内容库）  
+4. 勾选左侧方框（或点开一条）→ **删除选中** → 确认一次（自动备份到导出目录，仍留在内容库）  
 5. 可选：需要复核时再 **加入安全清理**，在**安全清理**点 **删除 N 条**（自动备份并预演），再确认一次
 
 快捷键：`J` / `K` 或方向键上下条，空格勾选当前条，`/` 打开筛选，`Esc` 关闭抽屉/检查器/错误，`1` `2` `3` 切换内容库 / 洞察 / 清理。列表表头可点击切换排序。字号与间距标准见 [docs/DESIGN.md](docs/DESIGN.md)。

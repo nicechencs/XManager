@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 
-/// Default directory (cwd-relative), matching `exports/`.
+/// Relative log folder name under the data directory (`logs/`).
 pub const DEFAULT_LOG_DIR: &str = "logs";
 /// Operational / diagnostic retention.
 pub const DEFAULT_APP_RETENTION_DAYS: u32 = 14;
@@ -178,8 +178,19 @@ impl Default for LogConfig {
 
 impl LogConfig {
     /// Read `XMANAGER_LOG_*` from the process environment (missing keys → defaults).
+    ///
+    /// When `XMANAGER_LOG_DIR` is unset, the directory is
+    /// [`crate::paths::PathResolver::log_dir`] (repo `./logs` while developing,
+    /// user data dir for a packaged app).
     pub fn from_env() -> Self {
-        Self::from_vars(std::env::vars())
+        let mut cfg = Self::from_vars(std::env::vars());
+        match std::env::var("XMANAGER_LOG_DIR") {
+            Ok(ref dir) if !dir.trim().is_empty() => {}
+            _ => {
+                cfg.dir = crate::paths::PathResolver::from_process().log_dir();
+            }
+        }
+        cfg
     }
 
     /// Apply `XMANAGER_LOG_*` overrides from an arbitrary key/value iterator.
@@ -514,10 +525,7 @@ impl EventBuilder {
 
 /// Start a record. No-op until [`init`] / [`init_best_effort`] succeeds.
 pub fn event(level: Level, stream: Stream, name: &'static str) -> EventBuilder {
-    debug_assert!(
-        is_valid_event_name(name),
-        "invalid log event name: {name}"
-    );
+    debug_assert!(is_valid_event_name(name), "invalid log event name: {name}");
     EventBuilder {
         level,
         stream,
@@ -657,9 +665,10 @@ mod tests {
             dir: dir.path().to_path_buf(),
             ..LogConfig::default()
         };
-        let keep_app = dir
-            .path()
-            .join(log_file_name(Stream::App, today - chrono::Duration::days(14)));
+        let keep_app = dir.path().join(log_file_name(
+            Stream::App,
+            today - chrono::Duration::days(14),
+        ));
         let drop_app = dir.path().join(log_file_name(
             Stream::App,
             today - chrono::Duration::days(15),
@@ -789,7 +798,8 @@ mod tests {
             fields: Map::new(),
         });
         let today = Local::now().date_naive();
-        let audit = fs::read_to_string(dir.path().join(log_file_name(Stream::Audit, today))).unwrap();
+        let audit =
+            fs::read_to_string(dir.path().join(log_file_name(Stream::Audit, today))).unwrap();
         assert!(audit.contains("cleanup.delete"));
         let app_path = dir.path().join(log_file_name(Stream::App, today));
         assert!(!app_path.exists() || fs::read_to_string(app_path).unwrap().is_empty());

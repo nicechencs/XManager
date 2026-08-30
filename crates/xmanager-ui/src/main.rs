@@ -1,5 +1,7 @@
 //! XManager desktop entry (GPUI 0.2.2).
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod theme;
 mod views;
@@ -59,21 +61,23 @@ fn main() {
         .field("file_logging", logging_ok)
         .emit();
 
-    Application::new().with_assets(UiAssets).run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                app_id: Some("xmanager".into()),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("XManager".into()),
+    Application::new()
+        .with_assets(UiAssets)
+        .run(|cx: &mut App| {
+            let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    app_id: Some("xmanager".into()),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("XManager".into()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
-            |_window, cx| cx.new(|cx| AppState::new(cx)),
-        )
-        .expect("failed to open XManager window");
-        cx.activate(true);
-    });
+                },
+                |_window, cx| cx.new(|cx| AppState::new(cx)),
+            )
+            .expect("failed to open XManager window");
+            cx.activate(true);
+        });
 }

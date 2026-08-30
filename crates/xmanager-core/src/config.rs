@@ -1,6 +1,7 @@
 //! Application settings loaded from environment / `.env`.
 
 use crate::error::{Error, Result};
+use crate::paths::PathResolver;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -17,18 +18,26 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// Load from process env and optional `.env` file (searched from cwd upward).
+    /// Load from process env and optional `.env` file.
     ///
+    /// Search order is documented on [`PathResolver::env_file_candidates`].
     /// File values override already-set process env so「刷新状态」can pick up
     /// a `.env` that was filled in after launch.
     pub fn load() -> Result<Self> {
-        for candidate in [".env", "../.env", "../../.env"] {
-            if Path::new(candidate).exists() {
-                let _ = dotenvy::from_filename_override(candidate);
-                break;
-            }
+        Self::load_with(&PathResolver::from_process())
+    }
+
+    /// Like [`Self::load`], using an injected path snapshot (tests / packaging).
+    pub fn load_with(paths: &PathResolver) -> Result<Self> {
+        if let Some(path) = paths.find_env_file() {
+            let _ = dotenvy::from_filename_override(&path);
         }
         Self::from_env()
+    }
+
+    /// Path of the `.env` that [`Self::load`] would pick, if any.
+    pub fn discovered_env_file() -> Option<PathBuf> {
+        PathResolver::from_process().find_env_file()
     }
 
     /// Load only from current process environment (no file IO).
@@ -98,7 +107,7 @@ impl Settings {
         let missing = self.missing_oauth1();
         if !missing.is_empty() {
             return Err(Error::MissingCredentials(format!(
-                "{} — copy .env.example to .env and fill values from console.x.com → Keys and tokens",
+                "{} — copy .env.example to .env next to the app or in the user data directory, then fill values from console.x.com → Keys and tokens",
                 missing.join(", ")
             )));
         }
@@ -117,9 +126,9 @@ impl Settings {
         self.require_oauth1().is_ok()
     }
 
-    /// Resolve a path for export files (default `./exports`).
+    /// Resolve a path for export files (`<data-dir>/exports`).
     pub fn default_export_dir() -> PathBuf {
-        PathBuf::from("exports")
+        PathResolver::from_process().export_dir()
     }
 
     /// Presence flags only — never the raw secret values.
@@ -171,7 +180,7 @@ impl CredentialLayout {
     /// Sidebar / empty-state line. Never a generic「缺少凭证」for swapped fields.
     pub fn sidebar_zh(self) -> &'static str {
         match self {
-            Self::Missing => "缺少 OAuth 凭证，请配置 .env（X_API_KEY 等）",
+            Self::Missing => "缺少 OAuth 凭证，请配置 .env（程序旁边或用户配置目录）",
             Self::Ready => "凭证已配置 ✓",
             Self::Swapped => {
                 "字段已填但填反：X_API_KEY 里是 Access Token（形如 用户ID-…）。请到 console.x.com → Keys and tokens 把 Consumer Key 与 User Token 对调。"
@@ -185,7 +194,7 @@ impl CredentialLayout {
     pub fn user_facing(self) -> &'static str {
         match self {
             Self::Missing => {
-                "缺少 OAuth 凭证。请把 .env.example 复制为 .env，从 console.x.com → Keys and tokens 填写四项。"
+                "缺少 OAuth 凭证。请把 .env.example 复制为 .env，放到程序同一个文件夹或用户配置目录，从 console.x.com → Keys and tokens 填写四项。"
             }
             Self::Ready => "OAuth 凭证字段已按 Consumer Key / User Access Token 填好。",
             Self::Swapped => {
@@ -242,6 +251,44 @@ mod tests {
     fn load_from_missing_file_errors() {
         let err = Settings::load_from("definitely-missing-xmanager.env").unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn load_with_reads_env_next_to_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe_dir = dir.path().join("app");
+        let cwd = dir.path().join("cwd");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(
+            exe_dir.join(".env"),
+            "X_API_KEY=from-exe\nX_API_SECRET=s\nX_ACCESS_TOKEN=t\nX_ACCESS_TOKEN_SECRET=ts\n",
+        )
+        .unwrap();
+        for key in [
+            "X_API_KEY",
+            "X_API_SECRET",
+            "X_ACCESS_TOKEN",
+            "X_ACCESS_TOKEN_SECRET",
+        ] {
+            std::env::remove_var(key);
+        }
+        let paths = PathResolver {
+            cwd,
+            exe: Some(exe_dir.join("xmanager.exe")),
+            user_data: None,
+            data_dir_override: None,
+        };
+        let s = Settings::load_with(&paths).unwrap();
+        assert_eq!(s.api_key, "from-exe");
+        for key in [
+            "X_API_KEY",
+            "X_API_SECRET",
+            "X_ACCESS_TOKEN",
+            "X_ACCESS_TOKEN_SECRET",
+        ] {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]

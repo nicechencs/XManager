@@ -52,7 +52,9 @@ impl Error {
     pub fn user_facing(&self) -> String {
         match self {
             Self::MissingCredentials(_) => {
-                format!("{self}。请把 .env.example 复制为 .env，从 console.x.com → Keys and tokens 填写四项。")
+                format!(
+                    "{self}。请把 .env.example 复制为 .env，放到程序同一个文件夹或用户配置目录，从 console.x.com → Keys and tokens 填写四项。"
+                )
             }
             Self::CredentialMisplaced(msg) => msg.clone(),
             Self::Api { status: 401, .. } => {

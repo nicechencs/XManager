@@ -7,11 +7,15 @@ XManager/
 ├── Cargo.toml                 # Rust workspace 根
 ├── .env.example               # API 凭证模板（勿提交 .env）
 ├── run.sh / run.bat           # macOS·Linux / Windows 启动
+├── packaging/                 # 发版 zip 内 README、macOS Info.plist
+├── scripts/                   # Windows zip / macOS .app
+├── .github/workflows/         # PR CI 与 tag Release
 ├── README.md                  # 主文档
 ├── docs/
 │   ├── ARCHITECTURE.md        # 本文件
 │   ├── DESIGN.md              # 字号 / 间距 / 交互约定
-│   └── LOGGING.md
+│   ├── LOGGING.md
+│   └── RELEASE.md             # tag 与 GitHub Actions 发版
 ├── crates/
 │   ├── xmanager-core/         # 领域库：API / 筛选 / 导出（无 UI）
 │   │   ├── Cargo.toml
@@ -24,7 +28,8 @@ XManager/
 │   │       ├── export.rs      # CSV / JSON
 │   │       ├── filter.rs      # 筛选 + 统计 + 比率/时段
 │   │       ├── logging.rs     # JSONL 双流日志（app 14d / audit 90d）
-│   │       └── models.rs      # Tweet / User / PostKind / metrics
+│   │       ├── models.rs      # Tweet / User / PostKind / metrics
+│   │       └── paths.rs       # .env / logs / exports 目录
 │   ├── xmanager-cli/          # 命令行（JSON stdout，供自动化测试）
 │   └── xmanager-ui/           # 桌面端 GPUI 应用
 │       ├── Cargo.toml
@@ -34,15 +39,15 @@ XManager/
 │           ├── theme.rs
 │           ├── widgets.rs
 │           └── views/
-└── exports/                   # 运行时导出目录（gitignore）
-└── logs/                      # 运行时日志（gitignore；见 docs/LOGGING.md）
+└── exports/                   # 开发时导出目录（gitignore；打包后见用户配置目录）
+└── logs/                      # 开发时日志（gitignore；见 docs/LOGGING.md）
 ```
 
 ## 设计原则
 
 1. **UI 与领域分离**：所有 X API、筛选、导出逻辑在 `xmanager-core`；GPUI 只负责展示与交互。
 2. **阻塞 IO 在后台线程**：`reqwest::blocking` 不在 UI 帧内调用；通过 `background_executor` / 后台任务回写状态。
-3. **凭证只来自环境**：`.env` / 环境变量；永不写死密钥。
+3. **凭证只来自环境**：`.env` / 环境变量；永不写死密钥。`.env` 查找顺序：可执行文件旁边 → `XMANAGER_DATA_DIR` → 当前目录向上两级 → 用户配置目录。打包后的日志/导出写到用户配置目录（或 exe 旁已有 `.env` 的便携目录）。
 4. **删除需确认**：内容库可直接「删除选中」（一次确认 + 自动备份）；安全清理仍绑定 revision/receipt，真删前自动备份 + 预演，再确认一次。
 5. **目录干净**：根目录只放 workspace 配置与文档；实现代码只在 `crates/*`。
 6. **本地可审计日志**：诊断写 `logs/xmanager-app-YYYY-MM-DD.log`（14 天）；备份/预演/删除写 `logs/xmanager-audit-YYYY-MM-DD.log`（90 天，Info+ 不丢）。密钥与推文正文禁止入日志。详见 [LOGGING.md](LOGGING.md)。

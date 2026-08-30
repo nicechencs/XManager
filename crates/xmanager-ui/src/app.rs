@@ -457,7 +457,7 @@ pub fn library_empty_copy(
             return LibraryEmptyCopy {
                 kind: LibraryEmptyKind::CredentialsMissing,
                 title: "尚未配置凭证".into(),
-                detail: "请在项目根目录配置 .env（Consumer Key 不要填 Access Token），然后点「刷新状态」。".into(),
+                detail: xmanager_core::env_placement_hint_zh(),
             };
         }
         if last_fetch_failed {
@@ -794,6 +794,7 @@ impl AppState {
         // helper is global because render functions intentionally call
         // `theme::c(token)` without threading mode through every widget.
         crate::theme::set_mode(crate::theme::ThemeMode::Light);
+        let env_file = Settings::discovered_env_file().map(|p| p.display().to_string());
         let (credentials_ok, credential_layout, credentials_msg) = match Settings::load() {
             Ok(s) => {
                 let layout = s.credential_layout();
@@ -809,6 +810,7 @@ impl AppState {
                         .field("has_access_token", presence.access_token)
                         .field("has_access_token_secret", presence.access_token_secret)
                         .field("has_bearer", presence.bearer_token)
+                        .field_opt("env_file", env_file.as_deref())
                         .emit();
                 } else {
                     logging::warn(Stream::App, events::APP_CONFIG)
@@ -820,6 +822,7 @@ impl AppState {
                         .field("has_access_token", presence.access_token)
                         .field("has_access_token_secret", presence.access_token_secret)
                         .field("has_bearer", presence.bearer_token)
+                        .field_opt("env_file", env_file.as_deref())
                         .emit();
                 }
                 (ok, layout, SharedString::from(layout.sidebar_zh()))
@@ -1236,7 +1239,7 @@ impl AppState {
         cx.notify();
     }
 
-    /// Write a CSV backup under `exports/` and bind a receipt. Idempotent when
+    /// Write a CSV backup under the export directory and bind a receipt. Idempotent when
     /// a matching backup already exists.
     pub fn ensure_backup_for_current_candidates(&mut self) -> Result<String, String> {
         if self.has_valid_backup() {
@@ -1654,7 +1657,7 @@ impl AppState {
                 )
             }
             CredentialLayout::Missing | CredentialLayout::Ready => {
-                "未配置有效凭证，无法拉取。填好 .env 后可再点「拉取并分析」或「刷新状态」。".into()
+                "未配置有效凭证，无法拉取。把 .env 放到程序旁边或用户配置目录后，再点「拉取并分析」或「刷新状态」。".into()
             }
         }
     }
@@ -1821,7 +1824,7 @@ impl AppState {
                     entity
                         .update(cx, |state, cx| {
                             state.status_msg =
-                                SharedString::from("未打开存盘框，改写到默认 exports/ 目录");
+                                SharedString::from("未打开存盘框，改写到默认导出目录");
                             cx.notify();
                         })
                         .ok();
@@ -2434,6 +2437,9 @@ mod tests {
 
         let missing = library_empty_copy(false, 0, 0, false, false, CredentialLayout::Missing);
         assert_eq!(missing.kind, LibraryEmptyKind::CredentialsMissing);
+        assert!(missing.detail.contains(".env"), "{}", missing.detail);
+        assert!(missing.detail.contains("刷新状态"), "{}", missing.detail);
+        assert!(!missing.detail.contains("项目根目录"), "{}", missing.detail);
 
         let failed = library_empty_copy(false, 0, 0, false, true, CredentialLayout::Ready);
         assert_eq!(failed.kind, LibraryEmptyKind::FetchFailed);

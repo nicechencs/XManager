@@ -26,7 +26,7 @@ const EXIT_API: u8 = 3;
     about = "XManager command line (JSON stdout). Desktop UI is a separate binary."
 )]
 struct Cli {
-    /// Load credentials from this .env instead of walking the working directory.
+    /// Load credentials from this .env instead of searching next to the binary, the user data dir, and the working directory.
     #[arg(long, global = true, value_name = "PATH")]
     env: Option<PathBuf>,
 
@@ -251,6 +251,9 @@ fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
     let settings = load_settings(env_path)?;
     let missing = settings.missing_oauth1();
     let layout = settings.credential_layout();
+    let env_file = env_path
+        .map(|p| p.display().to_string())
+        .or_else(|| Settings::discovered_env_file().map(|p| p.display().to_string()));
     let payload = json!({
         "command": "creds",
         "oauth1": missing.is_empty() && layout != CredentialLayout::Swapped,
@@ -258,6 +261,7 @@ fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
         "layout": layout.as_str(),
         "hint": layout.user_facing(),
         "has_bearer": !settings.bearer_token.is_empty(),
+        "env_file": env_file,
     });
     let presence = settings.credential_presence();
     logging::info(Stream::App, events::APP_CONFIG)
@@ -275,6 +279,7 @@ fn cmd_creds(env_path: Option<&Path>) -> Result<(), u8> {
         .field("has_access_token", presence.access_token)
         .field("has_access_token_secret", presence.access_token_secret)
         .field("has_bearer", presence.bearer_token)
+        .field_opt("env_file", env_file.as_deref())
         .field("binary", "xmanager-cli")
         .emit();
     match layout {

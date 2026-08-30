@@ -32,6 +32,9 @@ Thumbs.db
 .claude/
 .codegraph/
 
+# Packaging output
+/dist/
+
 # Transient UI captures dropped at repo root (canonical shots live in docs/screenshots/)
 /current-ui.png
 /design-comparison*.png

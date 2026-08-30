@@ -820,7 +820,7 @@ fn library_delete_confirm(state: &AppState, cx: &mut Context<AppState>) -> Optio
             )
             .child(
                 theme::type_caption(div().text_color(theme::c(theme::TEXT_MUTED)))
-                    .child("确认后会自动备份到 exports/，再向 X 提交删除。仍留在内容库。"),
+                    .child("确认后会自动备份到导出目录，再向 X 提交删除。仍留在内容库。"),
             )
             .child(
                 div()
@@ -1073,7 +1073,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                 .gap_2()
                 .child(
                     theme::type_caption(div().text_color(theme::c(theme::TEXT_DIM)))
-                        .child("删除会自动备份到 exports/。需要时也可另存一份。"),
+                        .child("删除会自动备份到导出目录。需要时也可另存一份。"),
                 )
                 .child(btn(
                     "backup-csv",
@@ -1269,7 +1269,7 @@ fn render_cleanup(state: &AppState, cx: &mut Context<AppState>) -> Div {
                         div()
                             .text_xs()
                             .text_color(theme::c(theme::TEXT_MUTED))
-                            .child("备份已写入 exports/。点确认后才会向 X 提交删除。"),
+                            .child("备份已写入导出目录。点确认后才会向 X 提交删除。"),
                     )
                     .child(
                         div()

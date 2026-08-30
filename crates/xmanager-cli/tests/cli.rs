@@ -75,6 +75,8 @@ fn creds_ok_from_env_file() {
     assert_eq!(json["oauth1"], true);
     assert_eq!(json["missing"], json!([]));
     assert_eq!(json["layout"], "access_token_shape_missing");
+    let env_file = json["env_file"].as_str().unwrap_or("").replace('\\', "/");
+    assert!(env_file.ends_with("ok.env"), "{env_file}");
 }
 
 #[test]

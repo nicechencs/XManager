@@ -7,6 +7,7 @@ pub mod export;
 pub mod filter;
 pub mod logging;
 pub mod models;
+pub mod paths;
 
 pub use client::{TweetLookup, XClient};
 pub use config::{looks_like_user_access_token, CredentialLayout, CredentialPresence, Settings};
@@ -20,3 +21,4 @@ pub use logging::{Level as LogLevel, LogConfig, Outcome as LogOutcome, Stream as
 pub use models::{
     coalesce_impression_count, NonPublicMetrics, PostKind, PublicMetrics, Tweet, User,
 };
+pub use paths::{env_placement_hint_zh, PathResolver};

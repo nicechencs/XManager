@@ -26,7 +26,11 @@
 
 ## 文件命名
 
-目录默认 `./logs`（与 `./exports` 一样相对 cwd，已被 `.gitignore`）。
+目录默认是数据根下的 `logs/`：
+
+- 仓库内 `cargo run`：当前目录的 `./logs`（与 `./exports` 一样，已被 `.gitignore`）
+- 打包后的桌面程序：用户配置目录，Windows 为 `%APPDATA%\XManager\logs`，macOS 为 `~/Library/Application Support/XManager/logs`
+- 可用 `XMANAGER_LOG_DIR` 覆盖日志目录，或用 `XMANAGER_DATA_DIR` 改整个数据根
 
 ```
 logs/xmanager-{stream}-{YYYY-MM-DD}.log
@@ -88,7 +92,7 @@ xmanager-cleanup-YYYYMMDD-HHMMSS.{csv|json}
 | event | stream | 默认级别 | 触发点 | 典型 fields |
 |-------|--------|----------|--------|-------------|
 | `app.start` | app | info | 进程启动 | `version`, `file_logging` |
-| `app.config` | app | info/warn/error | 读取 `.env` | `oauth1`, `has_api_key`…（仅有无，无值） |
+| `app.config` | app | info/warn/error | 读取 `.env` | `oauth1`, `has_api_key`…（仅有无，无值）, `env_file`（路径，可选） |
 | `api.request` | app | debug / error | 每次 HTTP | `http_method`, `url`（去 query）, `http_status`, `duration_ms` |
 | `api.rate_limited` | app | warn | HTTP 429 并准备等待 | `sleep_secs`, `retry` |
 | `account.whoami` | app | info/error | `GET /users/me` | `user_id`, `username`, `duration_ms` |
@@ -118,7 +122,8 @@ xmanager-cleanup-YYYYMMDD-HHMMSS.{csv|json}
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `XMANAGER_LOG_DIR` | `logs` | 日志目录 |
+| `XMANAGER_LOG_DIR` | 数据根下的 `logs/` | 日志目录 |
+| `XMANAGER_DATA_DIR` | 见上 | 数据根（其下 `logs/` 与 `exports/`） |
 | `XMANAGER_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 | `XMANAGER_LOG_APP_RETENTION_DAYS` | `14` | app 流保留天数 |
 | `XMANAGER_LOG_AUDIT_RETENTION_DAYS` | `90` | audit 流保留天数 |
