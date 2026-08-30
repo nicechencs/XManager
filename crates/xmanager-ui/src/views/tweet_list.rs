@@ -1,29 +1,49 @@
 //! Virtualized tweet list with checkbox selection, kind & rates.
 
 use crate::app::{chip_label, library_empty_copy, AppState, LibraryEmptyKind};
-use crate::theme::{self, space};
-use crate::widgets::{btn, checkbox_mark, empty_mark, kind_color, removable_chip, truncate_text};
+use crate::theme::{self, space, type_scale};
+use crate::widgets::{btn, checkbox_mark, empty_mark, kind_badge, removable_chip, truncate_text};
 use gpui::{div, prelude::*, px, uniform_list, Context, Div, SharedString, Window};
 use xmanager_core::{SortField, SortOrder, Tweet};
 
-const COL_CHECK: f32 = 32.0;
-const COL_KIND: f32 = 32.0;
-const COL_DATE: f32 = 56.0;
-const COL_VIEWS: f32 = 56.0;
+// Fixed columns must fit one horizontal CJK line. Caption is 12px; two glyphs
+// are ~24px. Cell padding is 8px per side. COL_KIND 32px was wrapping "类型"
+// into a vertical stack.
+const COL_CHECK: f32 = 40.0;
+const COL_KIND: f32 = 64.0;
+const COL_DATE: f32 = 80.0;
+const COL_VIEWS: f32 = 80.0;
 const CARD_ROW_H: f32 = 88.0;
+const HEADER_H: f32 = 40.0;
 const TABLE_ROW_H: f32 = 56.0;
-const CONTENT_LINES_H: f32 = 40.0;
 
-fn header_cell(label: &str, width: f32) -> Div {
+fn cell_box(width: f32) -> Div {
+    div()
+        .w(px(width))
+        .h_full()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .px(px(space::SM))
+        .overflow_hidden()
+}
+
+fn header_cell(label: &str, width: f32, center: bool) -> Div {
     theme::type_meta(
-        div()
-            .w(px(width))
-            .flex_none()
-            .px(px(space::SM))
+        cell_box(width)
+            .when(center, |el| el.justify_center())
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(theme::c(theme::TEXT_MUTED)),
     )
-    .child(label.to_string())
+    .child(
+        div()
+            .when(!center, |el| el.w_full())
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .truncate()
+            .child(label.to_string()),
+    )
 }
 
 fn sort_header(
@@ -42,11 +62,9 @@ fn sort_header(
         " ↓"
     };
     theme::type_meta(
-        div()
+        cell_box(width)
             .id(SharedString::from(format!("sort-header-{label}")))
-            .w(px(width))
-            .flex_none()
-            .px(px(space::SM))
+            .justify_end()
             .font_weight(if active {
                 gpui::FontWeight::SEMIBOLD
             } else {
@@ -61,24 +79,24 @@ fn sort_header(
             .hover(|s| s.text_color(theme::c(theme::TEXT)))
             .on_click(cx.listener(move |this, _, _window, cx| this.apply_sort_header(field, cx))),
     )
-    .child(format!("{label}{arrow}"))
+    .child(
+        div()
+            .w_full()
+            .text_right()
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .truncate()
+            .child(format!("{label}{arrow}")),
+    )
 }
 
 fn cell(text: impl Into<SharedString>, width: f32, muted: bool) -> Div {
-    theme::type_body(
-        div()
-            .w(px(width))
-            .flex_none()
-            .px(px(space::SM))
-            .text_color(if muted {
-                theme::c(theme::TEXT_MUTED)
-            } else {
-                theme::c(theme::TEXT)
-            })
-            .overflow_hidden()
-            .whitespace_nowrap(),
-    )
-    .child(text.into())
+    theme::type_body(cell_box(width).justify_end().text_color(if muted {
+        theme::c(theme::TEXT_MUTED)
+    } else {
+        theme::c(theme::TEXT)
+    }))
+    .child(div().w_full().text_right().truncate().child(text.into()))
 }
 
 fn row_bg(focused: bool, selected: bool, ix: usize) -> gpui::Rgba {
@@ -98,20 +116,25 @@ fn labeled_field(label: &str, value: impl Into<SharedString>, color: gpui::Rgba)
         .flex()
         .flex_row()
         .items_center()
+        .flex_none()
         .gap_1()
         .child(
-            div()
-                .text_xs()
-                .text_color(theme::c(theme::TEXT_MUTED))
-                .child(label.to_string()),
+            theme::type_meta(
+                div()
+                    .text_color(theme::c(theme::TEXT_MUTED))
+                    .whitespace_nowrap(),
+            )
+            .child(label.to_string()),
         )
         .child(
-            div()
-                .text_xs()
-                .text_color(color)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(value.into()),
+            theme::type_meta(
+                div()
+                    .text_color(color)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .truncate(),
+            )
+            .child(value.into()),
         )
 }
 
@@ -119,23 +142,38 @@ fn table_header(state: &AppState, cx: &mut Context<AppState>) -> Div {
     div()
         .flex()
         .flex_row()
+        .flex_nowrap()
         .items_center()
-        .h(px(40.))
+        .w_full()
+        .h(px(HEADER_H))
+        .flex_none()
+        .overflow_hidden()
         .px(px(space::SM))
-        .bg(theme::c(theme::BG_PANEL))
+        .bg(theme::c(theme::CHIP))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
-        .child(header_cell("", COL_CHECK))
-        .child(header_cell("类型", COL_KIND))
+        .child(header_cell("", COL_CHECK, true))
+        .child(header_cell("类型", COL_KIND, true))
         .child(
-            div().flex_1().px(px(space::SM)).child(
-                theme::type_meta(
-                    div()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(theme::c(theme::TEXT_MUTED)),
-                )
-                .child("内容"),
-            ),
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .flex()
+                .items_center()
+                .px(px(space::SM))
+                .overflow_hidden()
+                .child(
+                    theme::type_meta(
+                        div()
+                            .w_full()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(theme::c(theme::TEXT_MUTED))
+                            .whitespace_nowrap()
+                            .truncate(),
+                    )
+                    .child("内容"),
+                ),
         )
         .child(sort_header("日期", COL_DATE, SortField::Date, state, cx))
         .child(sort_header("曝光", COL_VIEWS, SortField::Views, state, cx))
@@ -154,35 +192,33 @@ fn skeleton_bar(width: f32, muted: bool) -> Div {
 }
 
 fn skeleton_cell(bar_width: f32, col_width: f32, muted: bool) -> Div {
-    div()
-        .w(px(col_width))
-        .flex_none()
-        .px_1()
-        .flex()
-        .items_center()
-        .child(skeleton_bar(bar_width, muted))
+    cell_box(col_width).child(skeleton_bar(bar_width, muted))
 }
 
 fn skeleton_row(ix: usize) -> Div {
     const CONTENT_W: [f32; 8] = [172., 244., 128., 216., 188., 148., 232., 160.];
-    const DATE_W: [f32; 8] = [76., 84., 64., 80., 70., 88., 72., 78.];
-    const VIEWS_W: [f32; 8] = [36., 28., 40., 32., 24., 38., 30., 34.];
+    const DATE_W: [f32; 8] = [44., 48., 40., 46., 42., 50., 44., 48.];
+    const VIEWS_W: [f32; 8] = [28., 22., 32., 26., 20., 30., 24., 28.];
     let muted = ix % 2 == 1;
     div()
         .flex()
         .flex_row()
+        .flex_nowrap()
         .items_center()
+        .w_full()
         .h(px(TABLE_ROW_H))
-        .px_2()
+        .px(px(space::SM))
+        .bg(row_bg(false, false, ix))
         .border_b_1()
         .border_color(theme::c(theme::BORDER))
         .child(skeleton_cell(14., COL_CHECK, muted))
-        .child(skeleton_cell(20., COL_KIND, muted))
+        .child(skeleton_cell(36., COL_KIND, muted))
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .px_1()
+                .h_full()
+                .px(px(space::SM))
                 .flex()
                 .items_center()
                 .child(skeleton_bar(CONTENT_W[ix], muted)),
@@ -324,6 +360,7 @@ fn row_checkbox(id: String, selected: bool, cx: &mut Context<AppState>) -> impl 
     div()
         .id(SharedString::from(format!("tweet-check-{id}")))
         .w(px(COL_CHECK))
+        .h_full()
         .flex_none()
         .flex()
         .items_center()
@@ -346,7 +383,7 @@ fn tweet_table_row(
     let id = tweet.id.clone();
     let row_id = id.clone();
     let kind = tweet.kind();
-    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 120);
+    let text_preview = truncate_text(&tweet.text.replace('\n', " "), 180);
     let views = tweet.views();
     let date = tweet.display_date_short();
 
@@ -354,8 +391,11 @@ fn tweet_table_row(
         .id(SharedString::from(format!("tweet-row-{id}")))
         .flex()
         .flex_row()
+        .flex_nowrap()
         .items_center()
+        .w_full()
         .h(px(TABLE_ROW_H))
+        .overflow_hidden()
         .px(px(space::SM))
         .bg(row_bg(focused, selected, ix))
         .border_b_1()
@@ -367,26 +407,34 @@ fn tweet_table_row(
         }))
         .child(row_checkbox(id, selected, cx))
         .child(
-            theme::type_meta(
-                div()
-                    .w(px(COL_KIND))
-                    .flex_none()
-                    .px(px(space::XS))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(kind_color(kind)),
-            )
-            .child(kind.short()),
+            div()
+                .w(px(COL_KIND))
+                .h_full()
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .overflow_hidden()
+                .child(kind_badge(kind)),
         )
         .child(
-            div().flex_1().min_w(px(0.)).px(px(space::SM)).child(
-                theme::type_body(
-                    div()
-                        .h(px(CONTENT_LINES_H))
-                        .text_color(theme::c(theme::TEXT))
-                        .overflow_hidden(),
-                )
-                .child(text_preview),
-            ),
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .flex()
+                .items_center()
+                .px(px(space::SM))
+                .overflow_hidden()
+                .child(
+                    theme::type_body(
+                        div()
+                            .w_full()
+                            .line_clamp(2)
+                            .text_color(theme::c(theme::TEXT)),
+                    )
+                    .child(text_preview),
+                ),
         )
         .child(cell(date, COL_DATE, true))
         .child(cell(format!("{views}"), COL_VIEWS, false))
@@ -410,8 +458,10 @@ fn tweet_card_row(
         .id(SharedString::from(format!("tweet-row-{id}")))
         .flex()
         .flex_row()
-        .items_start()
+        .items_center()
+        .w_full()
         .h(px(CARD_ROW_H))
+        .overflow_hidden()
         .px(px(space::MD))
         .py(px(space::SM))
         .gap(px(space::SM))
@@ -430,14 +480,16 @@ fn tweet_card_row(
                 .flex_col()
                 .flex_1()
                 .min_w(px(0.))
+                .justify_center()
                 .gap_1()
                 .child(
                     div()
                         .flex()
                         .flex_row()
-                        .flex_wrap()
+                        .items_center()
                         .gap_2()
-                        .child(labeled_field("类型", kind.label_zh(), kind_color(kind)))
+                        .overflow_hidden()
+                        .child(kind_badge(kind))
                         .child(labeled_field("日期", date, theme::c(theme::TEXT_MUTED)))
                         .child(labeled_field(
                             "曝光",
@@ -448,10 +500,10 @@ fn tweet_card_row(
                 .child(
                     theme::type_body(
                         div()
-                            .h(px(CONTENT_LINES_H))
+                            .w_full()
                             .min_w(px(0.))
-                            .text_color(theme::c(theme::TEXT))
-                            .overflow_hidden(),
+                            .line_clamp(2)
+                            .text_color(theme::c(theme::TEXT)),
                     )
                     .child(text_preview),
                 ),
@@ -466,7 +518,10 @@ pub fn render_tweet_list(state: &AppState, cx: &mut Context<AppState>) -> Div {
         .flex()
         .flex_col()
         .flex_1()
+        .w_full()
         .min_h(px(0.))
+        .min_w(px(0.))
+        .overflow_hidden()
         .when(!as_cards, |el| el.child(table_header(state, cx)))
         .child(if count == 0 {
             empty_state(state, cx).into_any_element()
@@ -498,9 +553,39 @@ pub fn render_tweet_list(state: &AppState, cx: &mut Context<AppState>) -> Div {
                     items
                 }),
             )
+            .w_full()
             .flex_1()
             .h_full()
+            .min_h(px(0.))
             .track_scroll(state.library_scroll.clone())
             .into_any_element()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_columns_keep_cjk_headers_on_one_line() {
+        let glyph = type_scale::CAPTION;
+        let pad = space::SM * 2.0;
+        let sort_arrow = 16.0;
+        assert!(
+            COL_KIND >= glyph * 2.0 + pad,
+            "COL_KIND={COL_KIND} cannot hold 类型 horizontally"
+        );
+        assert!(
+            COL_DATE >= glyph * 2.0 + pad + sort_arrow,
+            "COL_DATE={COL_DATE} cannot hold 日期 plus sort arrow"
+        );
+        assert!(
+            COL_VIEWS >= glyph * 2.0 + pad + sort_arrow,
+            "COL_VIEWS={COL_VIEWS} cannot hold 曝光 plus sort arrow"
+        );
+        assert!(
+            TABLE_ROW_H >= type_scale::BODY_LINE * 2.0,
+            "TABLE_ROW_H={TABLE_ROW_H} cannot fit two body lines"
+        );
+    }
 }

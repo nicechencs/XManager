@@ -312,7 +312,8 @@ pub fn kind_badge(kind: PostKind) -> Div {
             .rounded(px(radius::MD))
             .bg(theme::c(theme::CHIP))
             .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(kind_color(kind)),
+            .text_color(kind_color(kind))
+            .whitespace_nowrap(),
     )
     .child(kind.label_zh().to_string())
 }
