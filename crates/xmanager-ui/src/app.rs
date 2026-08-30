@@ -223,14 +223,70 @@ pub enum Route {
     Cleanup,
 }
 
-/// One-click confirm panel shown after backup/preview, before irreversible delete.
+/// Where the in-app delete confirm was opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteSource {
+    /// Content library: checkbox / focused row, no cleanup visit required.
+    Library,
+    /// Optional safe-cleanup review tray.
+    Cleanup,
+}
+
+/// One-click confirm panel shown before irreversible delete.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteConfirm {
     pub expected_count: usize,
+    pub source: DeleteSource,
+    pub ids: HashSet<String>,
+}
+
+impl DeleteConfirm {
+    pub fn library(ids: HashSet<String>) -> Self {
+        let expected_count = ids.len();
+        Self {
+            expected_count,
+            source: DeleteSource::Library,
+            ids,
+        }
+    }
+
+    pub fn cleanup(ids: HashSet<String>) -> Self {
+        let expected_count = ids.len();
+        Self {
+            expected_count,
+            source: DeleteSource::Cleanup,
+            ids,
+        }
+    }
 }
 
 pub fn delete_confirm_ready(confirm: &DeleteConfirm) -> bool {
-    confirm.expected_count > 0
+    confirm.expected_count > 0 && confirm.ids.len() == confirm.expected_count
+}
+
+/// Library confirm copy: count + irreversible, no extra “continue” wording.
+pub fn library_delete_prompt(count: usize) -> String {
+    format!("将永久删除 {count} 条，不可恢复")
+}
+
+/// Resolve tweet bodies for a delete/backup set. Library cache wins, then cleanup snapshot.
+pub fn tweets_for_ids(
+    ids: &HashSet<String>,
+    all_tweets: &[Tweet],
+    snapshot: &HashMap<String, Tweet>,
+) -> Vec<Tweet> {
+    let mut tweets: Vec<Tweet> = ids
+        .iter()
+        .filter_map(|id| {
+            all_tweets
+                .iter()
+                .find(|tweet| tweet.id == *id)
+                .cloned()
+                .or_else(|| snapshot.get(id).cloned())
+        })
+        .collect();
+    tweets.sort_by(|a, b| a.id.cmp(&b.id));
+    tweets
 }
 
 /// Removable applied-filter chips shown in the Library toolbar.
@@ -548,7 +604,7 @@ pub fn cleanup_next_hint(
     confirm: Option<&DeleteConfirm>,
 ) -> String {
     if candidate_count == 0 {
-        return "先回内容库勾选或打开一条，再点「加入安全清理」。加入后仍留在内容库，方便继续挑选。".into();
+        return "内容库可直接「删除选中」。需要复核时再加入安全清理。".into();
     }
     if !credentials_ok {
         return "已有候选，但缺少有效 OAuth 凭证，无法删除。".into();
@@ -1035,7 +1091,7 @@ impl AppState {
             cx.notify();
             return;
         }
-        self.delete_confirm = Some(DeleteConfirm { expected_count: n });
+        self.delete_confirm = Some(DeleteConfirm::cleanup(self.cleanup_candidates.clone()));
         self.status_msg = SharedString::from(format!("将删除 {n} 条。点「确认删除」继续，或取消。"));
         self.error_msg = None;
         cx.notify();
@@ -1126,6 +1182,30 @@ impl AppState {
         cx.notify();
     }
 
+    /// Open the library-direct delete confirm. Checkbox wins; focused row counts if none checked.
+    pub fn request_library_delete(&mut self, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        let ids = ids_for_cleanup_staging(&self.selected, self.focused_tweet_id.as_deref());
+        if ids.is_empty() {
+            self.set_error("请先勾选推文，或点开一条再删除");
+            cx.notify();
+            return;
+        }
+        self.reload_credentials();
+        if !self.credentials_ok {
+            self.set_error("未配置有效凭证，无法删除");
+            cx.notify();
+            return;
+        }
+        let n = ids.len();
+        self.delete_confirm = Some(DeleteConfirm::library(ids.into_iter().collect()));
+        self.status_msg = SharedString::from(library_delete_prompt(n));
+        self.error_msg = None;
+        cx.notify();
+    }
+
     pub fn add_selected_to_cleanup(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
@@ -1165,26 +1245,42 @@ impl AppState {
         if tweets.is_empty() {
             return Err("暂无安全清理候选".into());
         }
+        let written = self.write_cleanup_csv_backup(&tweets, "auto")?;
+        self.backup_receipt = Some(Receipt {
+            revision: self.cleanup_revision,
+            candidate_ids: self.cleanup_candidates.clone(),
+        });
+        Ok(written)
+    }
+
+    fn write_cleanup_csv_backup(&self, tweets: &[Tweet], source: &str) -> Result<String, String> {
+        if tweets.is_empty() {
+            return Err("没有可备份的推文".into());
+        }
         let dir = Settings::default_export_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建导出目录: {e}"))?;
         let path = dir.join(format!(
             "{}.csv",
             artifact_file_stem("cleanup", Local::now())
         ));
-        let written = export_csv(&tweets, &path).map_err(|e| e.to_string())?;
-        self.backup_receipt = Some(Receipt {
-            revision: self.cleanup_revision,
-            candidate_ids: self.cleanup_candidates.clone(),
-        });
+        let written = export_csv(tweets, &path).map_err(|e| e.to_string())?;
         logging::info(Stream::Audit, events::CLEANUP_BACKUP)
             .outcome(Outcome::Ok)
             .field("revision", self.cleanup_revision)
             .field("count", tweets.len() as u64)
             .field("path", written.display().to_string())
-            .field("receipt_bound", true)
-            .field("source", "auto")
+            .field("receipt_bound", source == "auto")
+            .field("source", source)
             .emit();
         Ok(written.display().to_string())
+    }
+
+    fn backup_ids_to_exports(&self, ids: &HashSet<String>) -> Result<String, String> {
+        let tweets = tweets_for_ids(ids, &self.all_tweets, &self.cleanup_snapshot);
+        if tweets.is_empty() {
+            return Err("没有可备份的推文，已取消删除".into());
+        }
+        self.write_cleanup_csv_backup(&tweets, "library")
     }
 
     /// Local dry-run against the current cache/snapshot. Does not call the API.
@@ -1957,37 +2053,86 @@ impl AppState {
             cx.notify();
             return;
         }
-        let expected = self
-            .delete_confirm
-            .as_ref()
-            .map(|c| c.expected_count)
-            .unwrap_or(0);
-        if expected != self.cleanup_candidates.len() {
-            self.delete_confirm = None;
-            self.set_error("候选数量已变化，请重新点删除");
+        let Some(confirm) = self.delete_confirm.take() else {
+            self.set_error("请先确认删除");
             cx.notify();
             return;
+        };
+        match confirm.source {
+            DeleteSource::Library => {
+                self.active_route = Route::Library;
+                if let Err(err) = self.backup_ids_to_exports(&confirm.ids) {
+                    self.set_error(err);
+                    cx.notify();
+                    return;
+                }
+                let ids: Vec<String> = confirm.ids.into_iter().collect();
+                self.execute_delete_ids(ids, false, cx);
+            }
+            DeleteSource::Cleanup => {
+                if confirm.expected_count != self.cleanup_candidates.len()
+                    || confirm.ids != self.cleanup_candidates
+                {
+                    self.set_error("候选数量已变化，请重新点删除");
+                    cx.notify();
+                    return;
+                }
+                self.execute_delete_ids(confirm.ids.into_iter().collect(), true, cx);
+            }
         }
-        self.delete_confirm = None;
-        self.execute_real_delete(cx);
     }
 
-    fn execute_real_delete(&mut self, cx: &mut Context<Self>) {
+    fn apply_deleted_ids(&mut self, deleted: &HashSet<String>) {
+        if deleted.is_empty() {
+            return;
+        }
+        for id in deleted {
+            self.cleanup_snapshot.remove(id);
+        }
+        self.all_tweets.retain(|t| !deleted.contains(&t.id));
+        self.selected.retain(|id| !deleted.contains(id));
+        let cleanup_changed = self.cleanup_candidates.iter().any(|id| deleted.contains(id));
+        self.cleanup_candidates.retain(|id| !deleted.contains(id));
+        if cleanup_changed {
+            self.invalidate_cleanup_receipts();
+        }
+        if self
+            .focused_tweet_id
+            .as_ref()
+            .is_some_and(|id| deleted.contains(id))
+        {
+            self.focused_tweet_id = None;
+        }
+        self.recompute_filtered();
+    }
+
+    fn execute_delete_ids(
+        &mut self,
+        ids: Vec<String>,
+        require_cleanup_receipts: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.loading {
             return;
         }
-        let ids: Vec<String> = self.cleanup_candidates.iter().cloned().collect();
         if ids.is_empty() {
-            self.set_error("请先加入安全清理候选");
+            self.set_error(if require_cleanup_receipts {
+                "请先加入安全清理候选"
+            } else {
+                "请先勾选推文，或点开一条再删除"
+            });
             cx.notify();
             return;
         }
+        self.reload_credentials();
         if !self.credentials_ok {
             self.set_error("未配置有效凭证，无法删除");
             cx.notify();
             return;
         }
-        if !self.has_valid_backup() || !self.has_valid_delete_preview() {
+        if require_cleanup_receipts
+            && (!self.has_valid_backup() || !self.has_valid_delete_preview())
+        {
             self.set_error("真实删除前必须为当前候选完成备份并预演");
             cx.notify();
             return;
@@ -2003,13 +2148,21 @@ impl AppState {
         cx.spawn(async move |_this: WeakEntity<Self>, cx: &mut AsyncApp| {
             let valid = entity
                 .update(cx, |state, cx| {
-                    let valid = state.has_valid_backup()
-                        && state.has_valid_preview()
-                        && state.cleanup_revision == revision
-                        && state.cleanup_candidates == snapshot;
+                    let valid = if require_cleanup_receipts {
+                        state.has_valid_backup()
+                            && state.has_valid_preview()
+                            && state.cleanup_revision == revision
+                            && state.cleanup_candidates == snapshot
+                    } else {
+                        state.credentials_ok
+                    };
                     if !valid {
                         state.loading = false;
-                        state.set_error("候选版本、备份或预演已变化，请重新执行安全清理步骤");
+                        state.set_error(if require_cleanup_receipts {
+                            "候选版本、备份或预演已变化，请重新执行安全清理步骤"
+                        } else {
+                            "未配置有效凭证，无法删除"
+                        });
                         cx.notify();
                     }
                     valid
@@ -2038,14 +2191,7 @@ impl AppState {
                             if ok > 0 {
                                 let deleted: HashSet<String> =
                                     outcome.succeeded.iter().cloned().collect();
-                                for id in &deleted {
-                                    state.cleanup_snapshot.remove(id);
-                                }
-                                state.all_tweets.retain(|t| !deleted.contains(&t.id));
-                                state.selected.retain(|id| !deleted.contains(id));
-                                state.cleanup_candidates.retain(|id| !deleted.contains(id));
-                                state.invalidate_cleanup_receipts();
-                                state.recompute_filtered();
+                                state.apply_deleted_ids(&deleted);
                             }
                             state.last_delete_outcome = Some(outcome.clone());
                             state.status_msg = SharedString::from(outcome.summary_line());
@@ -2104,11 +2250,12 @@ mod tests {
     use super::{
         applied_filter_chips, chip_label, clamp_inspector_width, classify_preview,
         cleanup_next_hint, cleanup_staging_notice, credentials_line_healthy, delete_confirm_ready,
-        ids_for_cleanup_staging, is_default_cleanup_preset, library_empty_copy,
-        next_sort_from_header, preview_from_lookup, receipt_matches, refresh_candidate_snapshot,
-        resolve_focused_tweet, tweet_preview_label, workspace_shortcut, AppliedFilterChip,
-        DeleteConfirm, DeleteOutcome, FilterDraft, LayoutMode,
-        LibraryEmptyKind, Receipt, WorkspaceShortcut, INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN,
+        ids_for_cleanup_staging, is_default_cleanup_preset, library_delete_prompt,
+        library_empty_copy, next_sort_from_header, preview_from_lookup, receipt_matches,
+        refresh_candidate_snapshot, resolve_focused_tweet, tweet_preview_label, tweets_for_ids,
+        workspace_shortcut, AppliedFilterChip, DeleteConfirm, DeleteOutcome, DeleteSource,
+        FilterDraft, LayoutMode, LibraryEmptyKind, Receipt, WorkspaceShortcut, INSPECTOR_WIDTH_MAX,
+        INSPECTOR_WIDTH_MIN,
     };
     use std::collections::{HashMap, HashSet};
     use xmanager_core::{
@@ -2191,16 +2338,69 @@ mod tests {
         assert!(empty.contains("内容库"));
         let staged = cleanup_next_hint(2, true, None);
         assert!(staged.contains("删除 2 条"));
-        let confirm = DeleteConfirm { expected_count: 2 };
+        let confirm = DeleteConfirm::cleanup(HashSet::from(["a".to_owned(), "b".to_owned()]));
         let waiting = cleanup_next_hint(2, true, Some(&confirm));
         assert!(waiting.contains("确认删除"));
         assert!(!waiting.contains("DELETE"));
+        let empty = cleanup_next_hint(0, true, None);
+        assert!(empty.contains("删除选中"));
+        assert!(empty.contains("安全清理"));
     }
 
     #[test]
     fn delete_confirm_is_ready_when_count_is_positive() {
-        assert!(!delete_confirm_ready(&DeleteConfirm { expected_count: 0 }));
-        assert!(delete_confirm_ready(&DeleteConfirm { expected_count: 3 }));
+        assert!(!delete_confirm_ready(&DeleteConfirm::cleanup(HashSet::new())));
+        assert!(delete_confirm_ready(&DeleteConfirm::library(HashSet::from([
+            "a".to_owned(),
+            "b".to_owned(),
+            "c".to_owned()
+        ]))));
+    }
+
+    #[test]
+    fn library_delete_prompt_is_one_irreversible_confirm() {
+        assert_eq!(library_delete_prompt(4), "将永久删除 4 条，不可恢复");
+        let confirm = DeleteConfirm::library(HashSet::from(["1".to_owned(), "2".to_owned()]));
+        assert_eq!(confirm.source, DeleteSource::Library);
+        assert_eq!(confirm.expected_count, 2);
+        assert!(delete_confirm_ready(&confirm));
+    }
+
+    #[test]
+    fn tweets_for_ids_prefers_library_then_snapshot() {
+        let all = vec![Tweet {
+            id: "a".into(),
+            text: "library".into(),
+            created_at: None,
+            public_metrics: PublicMetrics::default(),
+            non_public_metrics: xmanager_core::NonPublicMetrics::default(),
+            conversation_id: None,
+            in_reply_to_user_id: None,
+            is_retweet: false,
+            is_quote: false,
+        }];
+        let snapshot = HashMap::from([(
+            "b".to_owned(),
+            Tweet {
+                id: "b".into(),
+                text: "snapshot".into(),
+                created_at: None,
+                public_metrics: PublicMetrics::default(),
+                non_public_metrics: xmanager_core::NonPublicMetrics::default(),
+                conversation_id: None,
+                in_reply_to_user_id: None,
+                is_retweet: false,
+                is_quote: false,
+            },
+        )]);
+        let ids = HashSet::from(["a".to_owned(), "b".to_owned(), "missing".to_owned()]);
+        let tweets = tweets_for_ids(&ids, &all, &snapshot);
+        assert_eq!(
+            tweets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert_eq!(tweets[0].text, "library");
+        assert_eq!(tweets[1].text, "snapshot");
     }
 
     #[test]
