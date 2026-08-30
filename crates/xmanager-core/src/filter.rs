@@ -157,7 +157,7 @@ impl KindFilter {
 }
 
 /// Options for filtering tweets.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FilterOptions {
     pub max_views: Option<u64>,
     pub min_views: Option<u64>,

@@ -1,0 +1,136 @@
+/* Design tokens ported from crates GPUI theme.rs. Two palettes share the same
+   semantic token names; the light palette overrides dark defaults exactly as
+   theme.rs `palette()` does. */
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --bg-elevated: #161a22;
+  --bg-panel: #1b202a;
+  --bg-row: #141820;
+  --bg-row-alt: #181d27;
+  --bg-row-selected: #1f2a3d;
+  --bg-selected: #243b5f;
+  --bg-hover: #222834;
+  --border: #2a313d;
+  --border-strong: #3a4455;
+  --text: #e6eaf2;
+  --text-muted: #8b95a8;
+  --text-dim: #5c6678;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --chip: #242b38;
+  --chip-active: #1d3a6d;
+  --hist-bar: #38bdf8;
+  --quote: #a78bfa;
+  --disabled-bg: #303642;
+  --disabled-danger-bg: #3a1f1f;
+  --disabled-text: #6b7588;
+  --error-bg: #3b1515;
+  --text-on-accent: #e6eaf2;
+  --text-on-danger: #e6eaf2;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --bg-elevated: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-row: #ffffff;
+  --bg-row-alt: #fafafb;
+  --bg-row-selected: #eef2ff;
+  --bg-selected: #e0e7ff;
+  --bg-hover: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #172033;
+  --text-muted: #4f5d70;
+  --text-dim: #7b8798;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --success: #15803d;
+  --warning: #a15c00;
+  --danger: #c62828;
+  --danger-hover: #b91c1c;
+  --chip: #e9eef5;
+  --chip-active: #dbeafe;
+  --hist-bar: #0284c7;
+  --quote: #7c3aed;
+  --disabled-bg: #e5eaf1;
+  --disabled-danger-bg: #e5eaf1;
+  --disabled-text: #5e6a79;
+  --error-bg: #fee2e2;
+  --text-on-accent: #ffffff;
+  --text-on-danger: #ffffff;
+  --shadow: 0 8px 24px rgba(23, 32, 51, 0.12);
+}
+
+/* Type scale (theme.rs type_scale) and spacing (8px rhythm). */
+:root {
+  --font-ui: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+    system-ui, sans-serif;
+  --font-mono: Consolas, Menlo, "DejaVu Sans Mono", monospace;
+  --text-caption: 12px;
+  --lh-caption: 18px;
+  --text-body: 14px;
+  --lh-body: 22px;
+  --text-title: 18px;
+  --lh-title: 26px;
+  --text-display: 22px;
+  --lh-display: 30px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --control-h: 32px;
+  --chip-h: 28px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

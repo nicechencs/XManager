@@ -1,6 +1,6 @@
 # XManager 设计规范
 
-本文是桌面端视觉与交互的单一来源。实现落在 `crates/xmanager-ui/src/theme.rs`（色板、字号、间距）和 `widgets.rs`（控件）。
+本文是桌面端视觉与交互的单一来源。实现落在 `crates/xmanager-tauri/ui/src/theme.css`（色板、字号、间距的 CSS 变量，移植自原 GPUI `theme.rs` 调色板）与 React 组件（`ui/src/components/`）。
 
 ## 原则
 

@@ -27,6 +27,9 @@ Usage: ./run.sh [release|debug] [bin] [-- app-args...]
   cli       Run xmanager-cli (JSON automation)
   help      Show this help
 
+Frontend dev with hot reload:
+  cd crates/xmanager-tauri/ui && npm install && npm run tauri dev
+
 Examples:
   ./run.sh
   ./run.sh debug
@@ -77,20 +80,12 @@ warn_linux_desktop() {
     echo
   fi
 
-  local missing=()
-  local lib
-  for lib in libvulkan.so.1 libxkbcommon.so.0; do
-    if ! ldconfig -p 2>/dev/null | grep -Fq "$lib"; then
-      if [[ ! -e "/usr/lib/x86_64-linux-gnu/$lib" && ! -e "/usr/lib/$lib" && ! -e "/usr/lib64/$lib" ]]; then
-        missing+=("$lib")
-      fi
+  if ! ldconfig -p 2>/dev/null | grep -Fq "libwebkit2gtk"; then
+    if [[ ! -e "/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.1.so" && ! -e "/usr/lib/x86_64-linux-gnu/libwebkit2gtk-4.0.so" ]]; then
+      echo "[warn] Missing Linux libraries for the Tauri desktop app: libwebkit2gtk-4.1"
+      echo "       Debian/Ubuntu: sudo apt install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev"
+      echo
     fi
-  done
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "[warn] Missing Linux libraries for the GPUI desktop app: ${missing[*]}"
-    echo "       Debian/Ubuntu: sudo apt install -y libvulkan1 libxkbcommon0 libwayland-client0 mesa-vulkan-drivers"
-    echo "       Build headers: sudo apt install -y clang pkg-config libxkbcommon-dev libwayland-dev libvulkan-dev libfontconfig-dev"
-    echo
   fi
 }
 
@@ -175,11 +170,15 @@ fi
 require_cargo
 warn_linux_desktop
 
-echo "[info] Building xmanager-ui ($MODE)..."
+echo "[info] Building xmanager (Tauri) ($MODE)..."
+if [[ ! -f crates/xmanager-tauri/ui/dist/index.html ]]; then
+  echo "[error] Frontend not built. Run: cd crates/xmanager-tauri/ui && npm install && npm run build"
+  exit 1
+fi
 if [[ "$MODE" == release ]]; then
-  cargo run -p xmanager-ui --release -- "${PASS_ARGS[@]}"
+  cargo run -p xmanager-tauri --release --features custom-protocol -- "${PASS_ARGS[@]}"
 else
-  cargo run -p xmanager-ui -- "${PASS_ARGS[@]}"
+  cargo run -p xmanager-tauri --features custom-protocol -- "${PASS_ARGS[@]}"
 fi
 ec=$?
 if [[ "$ec" -ne 0 ]]; then

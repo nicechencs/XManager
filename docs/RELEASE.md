@@ -44,18 +44,20 @@ CI **不会**代你创建或移动 tag。
 
 ## 本地打包
 
-Windows（仓库根目录，先编好 release）：
+Windows（仓库根目录，先构建前端再编 release）：
 
 ```powershell
-cargo build --release -p xmanager-ui -p xmanager-cli
+cd crates\xmanager-tauri\ui; npm install; npm run build; cd ..\..
+cargo build --release -p xmanager-tauri --features custom-protocol -p xmanager-cli
 .\scripts\package-windows.ps1 -Version 0.1.0 -Ui target\release\xmanager.exe -Cli target\release\xmanager-cli.exe
 ```
 
-macOS（需要 Xcode / Command Line Tools，编两个架构再 `lipo`）：
+macOS（需要 Xcode / Command Line Tools 与 Node，编两个架构再 `lipo`）：
 
 ```bash
-cargo build --release --target aarch64-apple-darwin -p xmanager-ui -p xmanager-cli
-cargo build --release --target x86_64-apple-darwin -p xmanager-ui -p xmanager-cli
+(cd crates/xmanager-tauri/ui && npm install && npm run build)
+cargo build --release --target aarch64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
+cargo build --release --target x86_64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
 ./scripts/package-macos.sh --version 0.1.0 \
   --ui-arm target/aarch64-apple-darwin/release/xmanager \
   --ui-x64 target/x86_64-apple-darwin/release/xmanager \
@@ -72,4 +74,4 @@ cargo build --release --target x86_64-apple-darwin -p xmanager-ui -p xmanager-cl
 | `.github/workflows/ci.yml` | PR，以及 push 到 `main` / `dev` |
 | `.github/workflows/release.yml` | 推送 `v*.*.*` tag（提交须已在 `origin/main`） |
 
-PR CI：`rustfmt`、Windows / macOS 全 workspace 测试、Linux 上只测 `xmanager-core` 和 `xmanager-cli`（桌面端 GPUI 不在 Ubuntu 交叉编译）。
+PR CI：`rustfmt`、Windows / macOS 全 workspace 测试、Linux 上只测 `xmanager-core` 和 `xmanager-cli`（Linux 桌面构建需要 WebKitGTK 系统包，CI 未安装）。

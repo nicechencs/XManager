@@ -83,5 +83,5 @@ jobs:
         with:
           workspaces: "."
 
-      - name: Test crates without GPUI
+      - name: Test crates without the Tauri desktop shell
         run: cargo test -p xmanager-core -p xmanager-cli --locked --all-targets

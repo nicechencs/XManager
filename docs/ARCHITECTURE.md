@@ -31,22 +31,24 @@ XManager/
 │   │       ├── models.rs      # Tweet / User / PostKind / metrics
 │   │       └── paths.rs       # .env / logs / exports 目录
 │   ├── xmanager-cli/          # 命令行（JSON stdout，供自动化测试）
-│   └── xmanager-ui/           # 桌面端 GPUI 应用
+│   └── xmanager-tauri/        # 桌面端 Tauri 应用（二进制 xmanager）
 │       ├── Cargo.toml
-│       └── src/
+│       ├── tauri.conf.json
+│       └── src/               # Rust 命令层与状态（权威状态在此）
 │           ├── main.rs
-│           ├── app.rs
-│           ├── theme.rs
-│           ├── widgets.rs
-│           └── views/
+│           ├── state.rs       # 工作台状态机（筛选/选择/安全清理工作流）
+│           ├── commands.rs    # Tauri 命令（每个命令返回完整快照）
+│           ├── actions.rs     # 前端动作枚举
+│           ├── dto.rs         # 可序列化视图快照
+│           └── ui/            # React + TypeScript + Vite 前端（纯视图层）
 └── exports/                   # 开发时导出目录（gitignore；打包后见用户配置目录）
 └── logs/                      # 开发时日志（gitignore；见 docs/LOGGING.md）
 ```
 
 ## 设计原则
 
-1. **UI 与领域分离**：所有 X API、筛选、导出逻辑在 `xmanager-core`；GPUI 只负责展示与交互。
-2. **阻塞 IO 在后台线程**：`reqwest::blocking` 不在 UI 帧内调用；通过 `background_executor` / 后台任务回写状态。
+1. **UI 与领域分离**：所有 X API、筛选、导出逻辑在 `xmanager-core`；Tauri 命令层只做编排；React 前端是快照的纯视图。
+2. **阻塞 IO 在后台线程**：`reqwest::blocking` 通过 `spawn_blocking` 在异步运行时的阻塞池执行，完成后回写状态并返回新快照。
 3. **凭证只来自环境**：`.env` / 环境变量；永不写死密钥。`.env` 查找顺序：可执行文件旁边 → `XMANAGER_DATA_DIR` → 当前目录向上两级 → 用户配置目录。打包后的日志/导出写到用户配置目录（或 exe 旁已有 `.env` 的便携目录）。
 4. **删除需确认**：内容库可直接「删除选中」（一次确认 + 自动备份）；安全清理仍绑定 revision/receipt，真删前自动备份 + 预演，再确认一次。
 5. **目录干净**：根目录只放 workspace 配置与文档；实现代码只在 `crates/*`。
@@ -54,13 +56,14 @@ XManager/
 
 ## UI 壳层
 
-- **路由**：`Library | Insights | Cleanup`（共享 `AppState`，切页不丢筛选/候选）。
+- **路由**：`Library | Insights | Cleanup`（共享后端 `Workspace`，切页不丢筛选/候选）。
 - **筛选**：抽屉改条件后立刻写入 `applied_filter` 并重算列表。拉取条数 / 含转发与筛选分开，只影响下次 API 请求。chip 只显示非默认条件，可逐个移除。
 - **安全清理会话**：`cleanup_candidates` + `cleanup_snapshot` + `cleanup_revision` + backup/preview receipts。加入候选不切页；`cleanup_notice` 横幅提供「去安全清理」。内容库「删除选中」走独立确认，不要求先加入候选。
-- **视觉**：色板、字号、行高、间距 token 在 `xmanager-ui` 的 `theme.rs`，约定见 [DESIGN.md](DESIGN.md)。
-- **响应式**：`LayoutMode::{Wide,Medium,Narrow}` 由窗口宽度每帧同步。宽屏检查器仅在选中推文时占列；窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
-- **列表**：`uniform_list` 虚拟化渲染筛选结果。正文优先（两行），日期与曝光为次要列。
+- **视觉**：色板、字号、行高、间距 token 在前端 `ui/src/theme.css` 的 CSS 变量（移植自原 GPUI `theme.rs` 调色板），约定见 [DESIGN.md](DESIGN.md)。
+- **响应式**：`wide ≥1200px / medium ≥800px / narrow` 由前端监听视口宽度切换。宽屏检查器仅在选中推文时占列；窄屏筛选/检查器为全高覆盖层（不同时并排），列表为卡片行。
+- **列表**：`@tanstack/react-virtual` 虚拟化渲染筛选结果。正文优先（两行），日期与曝光为次要列。
 - **洞察**：全部已同步数据的汇总 + 曝光直方图（当前切片高亮）；点柱或预设回内容库。
+- **状态架构**：每个 Tauri 命令返回完整 `UiSnapshot`（推文、筛选、统计、清理工作流、状态行）。前端不持有业务状态，只渲染快照并把交互映射为命令调用。
 
 ## 数据流
 
@@ -95,11 +98,11 @@ tweets[] → FilterOptions
 | 响应式 | — | Wide 三栏；Medium 紧凑导航；Narrow 覆盖层 + 卡片 |
 | 命令行自动化 | `xmanager-cli` | — |
 
-`xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上 GPUI 二进制没有控制台，所以 CLI 是独立 crate。CLI 无 GUI 依赖，可在无显示器的 macOS / Linux 上使用。
+`xmanager-cli` 与 UI 共用 `xmanager-core`。Windows 上桌面二进制没有控制台，所以 CLI 是独立 crate。CLI 无 GUI 依赖，可在无显示器的 macOS / Linux 上使用。
 
 ## 构建
 
-桌面端（`xmanager-ui`）依赖 GPUI 0.2.2：macOS 用 Metal，Linux 用 Wayland 或 X11 + Vulkan，Windows 用现有后端。系统包见根目录 [README.md](../README.md)。
+桌面端（`xmanager-tauri`）基于 Tauri 2：Windows 用 WebView2，macOS 用 WKWebView，Linux 用 WebKitGTK。系统包见根目录 [README.md](../README.md)。
 
 ```bash
 # 领域库测试
@@ -110,9 +113,9 @@ cargo test -p xmanager-cli
 cargo run -p xmanager-cli -- --help
 # 或 ./run.sh cli -- --help   /   run.bat cli -- --help
 
-# 桌面应用
-cargo run -p xmanager-ui --release
-# 或
-cargo run --release
+# 桌面应用（先构建前端）
+cd crates/xmanager-tauri/ui && npm install && npm run build && cd ../..
+cargo run -p xmanager-tauri --release --features custom-protocol
 # 或 ./run.sh   /   run.bat
+# 前端热更新开发：cd crates/xmanager-tauri/ui && npm run tauri dev
 ```

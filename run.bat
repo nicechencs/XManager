@@ -7,6 +7,7 @@ rem   run.bat              release build + run
 rem   run.bat debug        debug build + run
 rem   run.bat bin          run existing release binary only (no rebuild)
 rem   run.bat debug bin    run existing debug binary only
+rem Frontend hot reload during development:  cd crates\xmanager-tauri\ui && npm install && npm run tauri dev
 
 cd /d "%~dp0" || exit /b 1
 
@@ -68,11 +69,15 @@ if errorlevel 1 (
 
 if "%BIN_ONLY%"=="1" goto try_bin
 
-echo [info] Building xmanager-ui ^(%MODE%^)...
+echo [info] Building xmanager (Tauri) ^(%MODE%^)...
+if not exist "crates\xmanager-tauri\ui\dist\index.html" (
+  echo [error] Frontend not built. Run: cd crates\xmanager-tauri\ui ^&^& npm install ^&^& npm run build
+  exit /b 1
+)
 if /I "%MODE%"=="release" (
-  cargo run -p xmanager-ui --release -- %PASS_ARGS%
+  cargo run -p xmanager-tauri --release --features custom-protocol -- %PASS_ARGS%
 ) else (
-  cargo run -p xmanager-ui -- %PASS_ARGS%
+  cargo run -p xmanager-tauri --features custom-protocol -- %PASS_ARGS%
 )
 set "EC=%ERRORLEVEL%"
 if not "%EC%"=="0" (
@@ -132,6 +137,9 @@ echo   debug     Build and run debug binary
 echo   bin       Skip cargo; run existing binary only
 echo   cli       Run xmanager-cli ^(JSON automation^)
 echo   help      Show this help
+echo.
+echo Frontend dev with hot reload:
+echo   cd crates\xmanager-tauri\ui ^&^& npm install ^&^& npm run tauri dev
 echo.
 echo Examples:
 echo   run.bat

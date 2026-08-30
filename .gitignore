@@ -31,9 +31,17 @@ Thumbs.db
 # Claude / local tooling
 .claude/
 .codegraph/
+.zcode/
 
 # Packaging output
 /dist/
+
+# Node / frontend (keep the placeholder so bare cargo builds pass tauri-build's
+# frontendDist existence check)
+node_modules/
+crates/xmanager-tauri/ui/dist/*
+!crates/xmanager-tauri/ui/dist/.gitkeep
+crates/xmanager-tauri/gen/
 
 # Transient UI captures dropped at repo root (canonical shots live in docs/screenshots/)
 /current-ui.png

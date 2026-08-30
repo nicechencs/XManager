@@ -133,7 +133,7 @@ xmanager-cleanup-YYYYMMDD-HHMMSS.{csv|json}
 排障时可临时：
 
 ```bash
-XMANAGER_LOG_LEVEL=debug cargo run -p xmanager-ui --release
+XMANAGER_LOG_LEVEL=debug cargo run -p xmanager-tauri --release --features custom-protocol
 ```
 
 ## 覆盖对照（实现前 → 现在）

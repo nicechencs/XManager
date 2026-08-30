@@ -7,7 +7,8 @@ on:
 
 # Native Windows + macOS builds, then a draft GitHub Release.
 # Tags must point at a commit already on origin/main (merge dev → main, then tag).
-# GPUI cannot be cross-compiled; each OS builds on its own runner.
+# The desktop app is Tauri: build the Vite frontend first, then the Rust binary
+# with --features custom-protocol (embeds ui/dist). Each OS builds on its own runner.
 permissions:
   contents: read
 
@@ -135,11 +136,22 @@ jobs:
         with:
           workspaces: "."
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/xmanager-tauri/ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: crates/xmanager-tauri/ui
+        run: npm ci && npm run build
+
       - name: Test workspace
         run: cargo test --workspace --locked --all-targets
 
       - name: Build release binaries
-        run: cargo build --release --locked -p xmanager-ui -p xmanager-cli
+        run: cargo build --release --locked -p xmanager-tauri --features custom-protocol -p xmanager-cli
 
       - name: Package zip
         shell: pwsh
@@ -190,14 +202,25 @@ jobs:
         with:
           workspaces: "."
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/xmanager-tauri/ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: crates/xmanager-tauri/ui
+        run: npm ci && npm run build
+
       - name: Test workspace
         run: cargo test --workspace --locked --all-targets
 
       - name: Build Apple Silicon
-        run: cargo build --release --locked --target aarch64-apple-darwin -p xmanager-ui -p xmanager-cli
+        run: cargo build --release --locked --target aarch64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
 
       - name: Build Intel
-        run: cargo build --release --locked --target x86_64-apple-darwin -p xmanager-ui -p xmanager-cli
+        run: cargo build --release --locked --target x86_64-apple-darwin -p xmanager-tauri --features custom-protocol -p xmanager-cli
 
       - name: Package .app zip
         env:

@@ -2,7 +2,7 @@
 
 快速筛选并管理你自己**访问量较低**的 X（推特）推文。
 
-主程序为 **Rust + GPUI** 桌面应用；领域逻辑在 `xmanager-core`。
+主程序为 **Rust + Tauri 2** 桌面应用（界面为 React + TypeScript Web 前端）；领域逻辑在 `xmanager-core`。
 
 [![CI](https://github.com/nicechencs/XManager/actions/workflows/ci.yml/badge.svg)](https://github.com/nicechencs/XManager/actions/workflows/ci.yml)
 
@@ -56,7 +56,7 @@ XManager/
 ├── crates/
 │   ├── xmanager-core/         # API · 筛选 · 导出
 │   ├── xmanager-cli/          # 命令行（JSON stdout）
-│   └── xmanager-ui/           # GPUI 桌面端（二进制 xmanager）
+│   └── xmanager-tauri/        # Tauri 桌面端（二进制 xmanager；React 前端在 ui/）
 └── docs/ARCHITECTURE.md
 └── docs/DESIGN.md             # 字号 / 间距 / 交互约定
 └── docs/LOGGING.md            # 日志命名 / 保留 / 事件目录
@@ -70,7 +70,8 @@ XManager/
 1. **Rust** stable（已在 `1.89+` 验证）
 2. **X Developer App**：[developer.x.com](https://developer.x.com) / [console.x.com](https://console.x.com)
 3. **OAuth 1.0a 四件套**，删除需要 **Read and Write**
-4. **Windows / macOS / Linux** 均可编译运行（GPUI 0.2.2：macOS 用 Metal，Linux 用 Wayland 或 X11 + Vulkan）
+4. **Node.js ≥ 20**（仅开发 / 打包前端时需要；运行打包后的程序不需要）
+5. **Windows / macOS / Linux** 均可编译运行（Tauri 2：Windows 用 WebView2（Win10/11 自带），macOS 用 WKWebView（系统自带），Linux 用 WebKitGTK）
 
 > API 多为按量付费；读自己的时间线一般为 owned reads。时间线通常最多约最近 3200 条。
 
@@ -145,7 +146,7 @@ open XManager.app
 | 入口 | 适用场景 |
 |------|----------|
 | `xmanager-cli` | 无 GUI 依赖；无显示器的 Linux / CI / 自动化也能跑 |
-| `xmanager`（桌面端） | 需要图形会话：macOS（Metal）、Linux（Wayland 或 X11 + Vulkan）、Windows |
+| `xmanager`（桌面端） | 需要图形会话与系统 WebView：Windows（WebView2）、macOS（WKWebView）、Linux（WebKitGTK） |
 
 ### 系统依赖
 
@@ -156,7 +157,7 @@ open XManager.app
 
 **macOS**
 
-- 安装 [Xcode](https://developer.apple.com/xcode/) 或 Command Line Tools（桌面端用 Metal 渲染）：
+- 安装 [Xcode](https://developer.apple.com/xcode/) 或 Command Line Tools：
 
 ```bash
 xcode-select --install
@@ -164,22 +165,13 @@ xcode-select --install
 
 **Linux（Debian / Ubuntu 示例）**
 
-桌面端编译需要 clang、pkg-config，以及 Wayland/X11、Vulkan、字体相关开发包：
+桌面端（Tauri / WebKitGTK）编译运行需要：
 
 ```bash
-sudo apt install -y clang pkg-config \
-  libxkbcommon-dev libxkbcommon-x11-dev \
-  libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev \
-  libfontconfig-dev libfreetype-dev \
-  libvulkan-dev libvulkan1 mesa-vulkan-drivers
+sudo apt install -y libwebkit2gtk-4.1-dev build-essential libssl-dev   libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
-运行桌面窗口还需要：
-
-1. 图形会话（`WAYLAND_DISPLAY` 或 `DISPLAY`）
-2. 可用的 Vulkan 设备（本机 GPU 驱动；无独显的虚拟机可装 `mesa-vulkan-drivers` 走 lavapipe 软件渲染）
-
-SSH / CI / 无显示器环境请用 CLI，不要启动桌面窗口。GPUI 在找不到 GPU 时会直接退出。
+运行桌面窗口还需要图形会话（`WAYLAND_DISPLAY` 或 `DISPLAY`）。SSH / CI / 无显示器环境请用 CLI，不要启动桌面窗口。
 
 **Windows**
 
@@ -210,8 +202,9 @@ run.bat debug bin    :: 只跑已有 debug 二进制
 或直接用 Cargo：
 
 ```bash
-# 在仓库根目录
-cargo run -p xmanager-ui --release
+# 在仓库根目录：先构建前端，再带 custom-protocol 编译后端
+cd crates/xmanager-tauri/ui && npm install && npm run build && cd ../..
+cargo run -p xmanager-tauri --release --features custom-protocol
 # 或
 cargo run --release
 # 已编译时（macOS / Linux）
@@ -220,7 +213,15 @@ cargo run --release
 ./target/release/xmanager.exe
 ```
 
-首次会编译 GPUI 及其依赖，耗时较长，属正常现象。
+首次会编译 Tauri 及其依赖，耗时较长，属正常现象。
+
+### 前端开发（热更新）
+
+```bash
+cd crates/xmanager-tauri/ui
+npm install
+npm run tauri dev   # 同时启动 Vite dev server 与 Rust 后端，改前端即时生效
+```
 
 ## 命令行（自动化 / 测试）
 
